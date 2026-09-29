@@ -1407,13 +1407,21 @@ const applyFreeKm = (raw: unknown) => {
 /**
  * 所选跑道"一圈多长"（米）：没描过/几何不足时为 0（界面据此不显示"约几圈"）。
  *
- * 🆕 2026-09-22（审计 B2）：**带 `freeShape`（非官方路径）的条目，一圈 = 画的圈**
+ * 🆕 2026-09-22（审计 B2）：**带 `freeShape`（路径编辑器画的）的条目，一圈 = 画的圈**
  *    —— 它的内外圈只是"给旧版本看的占位几何"，若拿占位几何去 `laneLoop` 插值，
  *    算出来的"一圈"既不是用户画的圈、也和跑步页用的 `lapLengthM` 对不上（圈数会互相打架）。
  *    ⚠️ 判据：**"一圈多长"只允许有一个来源**，与 `run.lapLengthM` 同一基准（`freePathLapLengthM`）。
+ *
+ * 🔴 2026-09-29（issue #13 实测踩到）：**不能只按 `run.lineId` 找条目**。
+ *    "服务端未下发线路"的任务里 `run.lineId` 是**空串**（`applyToRunner` 只从官方 `runPointList` 里选，
+ *    这类任务列表为空 ⇒ 永远选不出东西）⇒ 老写法 `find(lineId === '')` 恒落空 ⇒ 界面报
+ *    "这条几何还没有可用的一圈长度"，而**跑步引擎明明会用 `freeRouteEntry` 那条几何**（两处口径分叉）。
+ *    现在：**先按 `run.lineId` 找**（官方线路任务逐字不变），找不到且本任务"未下发线路"时
+ *    **回落到这次真正会用的那条**（`freeRouteEntry`，与引擎同源）。
  */
 const selectedLaneLengthM = computed(() => {
-  const e = libEntries.value.find((x) => String(x.lineId) === String(run.value.lineId))
+  const byLineId = libEntries.value.find((x) => String(x.lineId) === String(run.value.lineId))
+  const e = byLineId ?? (routeIsFree.value ? freeRouteEntry.value : undefined)
   if (!e) return 0
   const freeLap = freePathLapLengthM(e.freeShape)
   if (freeLap > 0) return freeLap

@@ -604,10 +604,11 @@ const save = () => {
   const localSaving = String(lineId.value) === LOCAL_FREE_LINE_ID
   const detail = `${localSaving ? '本机跑道 · ' : ''}第 ${entry.editCount ?? 1} 次保存 · ${entry.updatedAppVersion ? `v${entry.updatedAppVersion}` : '版本未知'} · 起跑点${hasStart.value ? '已设' : '未设'}`
   /**
-   * 🆕 审计 B4：这次保存**确实清掉了一条已存在的非官方路径形状**时要如实说 ——
+   * 🆕 审计 B4：这次保存**确实清掉了一条已存在的路径形状**时要如实说 ——
    * 否则用户会以为"存了双圈、形状还在"（实际跑步页已经改走双圈几何）。
+   * ⚠️ 2026-09-29 改名（用户口径）：那句话里的「【测试】非官方路径」→「研途健行路径」。
    */
-  const clearedShape = hadFreeShapeAtSave ? '（原先的【测试】非官方路径形状已清除，这条记录改回内外双圈）' : ''
+  const clearedShape = hadFreeShapeAtSave ? '（原先的研途健行路径形状已清除，这条记录改回内外双圈）' : ''
   showSnackbar(
     `已存入本机路线库（${detail}）${clearedShape}${persisted ? '' : '（但本机存储写入失败，刷新后可能丢失）'}`,
     persisted ? undefined : 'warning',

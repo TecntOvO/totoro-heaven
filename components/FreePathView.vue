@@ -431,7 +431,7 @@ const undoFreePoint = () => {
 const clearFreeShape = () => {
   draftFreePoints.value = []
   draftPolyPoints.value = []
-  showSnackbar('已清空非官方路径，可以重新画')
+  showSnackbar('已清空这条路径，可以重新画')
 }
 
 /**
@@ -530,7 +530,7 @@ const locateMe = () => {
  */
 const freeLocateCandidates = computed<LocateFallbackCandidate[]>(() => {
   const out: LocateFallbackCandidate[] = []
-  if (freeShapePath.value.length >= 2) out.push({ level: 'draft', pts: [...freeShapePath.value], label: '你正在画的非官方路径' })
+  if (freeShapePath.value.length >= 2) out.push({ level: 'draft', pts: [...freeShapePath.value], label: '你正在画的这条路径' })
   if (officialPts.value.length >= 2) out.push({ level: 'official', pts: officialPts.value, label: '本任务下发的官方路线' })
   const libPts: N[] = []
   for (const e of libEntries.value) {
@@ -634,7 +634,7 @@ const saveFreeShape = () => {
   const hadStartAtSave = hasStart.value
   const saved = lib.upsert(payload)
   if (!saved) {
-    showSnackbar('保存被拒：这条记录既没有合法的内外圈、也没有可用的非官方路径形状', 'error')
+    showSnackbar('保存被拒：这条记录既没有合法的内外圈、也没有可用的本机路径形状', 'error')
     return
   }
   const { entry: savedEntry, persisted } = saved

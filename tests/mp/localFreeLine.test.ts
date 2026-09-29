@@ -111,9 +111,10 @@ test('🔴 freeRouteGeometryChoice：老双圈条目**更晚保存**、`local:fr
   // 库是"最新在前"（`useTrackLibrary.upsert` 前插）⇒ 这条夹具就是"用户画完非官方路径后又存了别的"那现场
   const entries = [entry('sunrunLine-old', '2026-09-22T14:50:00.000Z'), entry(LOCAL_FREE_LINE_ID, '2026-09-22T14:31:00.000Z')]
   const choice = freeRouteGeometryChoice(entries, FREE_TASK)
-  assert.equal(choice.entry?.lineId, LOCAL_FREE_LINE_ID, '自由路线任务必须认「非官方路径」保存的那条，而不是"最近保存"')
+  assert.equal(choice.entry?.lineId, LOCAL_FREE_LINE_ID, '自由路线任务必须认「研途健行路径编辑器」保存的那条，而不是"最近保存"')
   assert.equal(choice.fallback, false, '优先命中不算回退 ⇒ 界面不该说"暂用最近保存的跑道"')
-  assert.match(choice.reason, /非官方路径/)
+  // ⚠️ 2026-09-29 改名：「非官方路径【测试】」→「研途健行路径编辑器」（用户口径）⇒ 这句依据里的名字跟着改
+  assert.match(choice.reason, /研途健行路径编辑器/)
   // 便捷包装（跑步引擎用）必须给出同一条
   assert.equal(freeRouteLocalEntry(entries, FREE_TASK)?.lineId, LOCAL_FREE_LINE_ID)
 })
@@ -122,8 +123,8 @@ test('freeRouteGeometryChoice：没有 `local:free`（老用户没画过）⇒ �
   const entries = [entry('sunrunLine-old', '2026-09-22T14:50:00.000Z'), entry('sunrunLine-older', '2026-09-20T02:00:00.000Z')]
   const choice = freeRouteGeometryChoice(entries, FREE_TASK)
   assert.equal(choice.entry?.lineId, 'sunrunLine-old', '退回最近保存的那条')
-  assert.equal(choice.fallback, true, '回退必须如实标记（界面据此说明"本机还没有非官方路径形状"）')
-  assert.match(choice.reason, /还没有「非官方路径」形状|暂用最近保存/)
+  assert.equal(choice.fallback, true, '回退必须如实标记（界面据此说明"本机还没有路径形状"）')
+  assert.match(choice.reason, /还没有|暂用最近保存/)
   // 库为空 ⇒ 没有几何（调用方按"还没有几何"提示，绝不假装有一条）
   const empty = freeRouteGeometryChoice([], FREE_TASK)
   assert.equal(empty.entry, undefined)

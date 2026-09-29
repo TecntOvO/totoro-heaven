@@ -23,6 +23,8 @@ import { routeRequirementOf, taskPaperIdOf } from '~/utils/mp/taskShape'
 import { resolveFreePathGeometry } from '~/utils/mp/freePathGeometry'
 import { freeRouteGeometryChoice, resolveEntryName, type TrackRouteEntry } from '~/utils/mp/trackLibrary'
 import { newRunSeed, planRealisticRun, type RunPlan } from '~/utils/mp/realism'
+// 🆕 2026-09-29（issue #13）：研途健行的"目标里程"归一化入口（与跑步页显示**同一个函数**）
+import { YTU_TARGET_KM_FALLBACK, clampYtuTargetKm } from '~/utils/mp/ytuRun'
 import { toSubmitRunType, type MpRunLine, type MpScoreDetailRequest, type MpScoreRequest } from '~/src/mp/types'
 import { DEMO_PASS_POINTS, demoScantronId } from '~/src/mp/demo'
 import { DEMO_STEP_M, REAL_STEP_M, TICK_MS, createRunState, type DemoStateApi } from './state'
@@ -105,7 +107,8 @@ function resolveTrackGeometry(entry: TrackRouteEntry): { geometry: LatLng[]; smo
 }
 
 export function useDemoRunner(state: DemoStateApi, recordsApi: DemoRecordsApi) {
-  const { demoMode, task, lines, run, session, freeRunKm } = state
+  /** 🆕 2026-09-29（issue #13）：`ytuTargetKm` = 研途健行的**目标里程覆盖值**（`null` = 用任务里程） */
+  const { demoMode, task, lines, run, session, freeRunKm, ytuTargetKm } = state
   const { records, persistRecords } = recordsApi
   /** 本地路线库（在"跑道编辑"里配置的内外圈）—— 必须在这里（setup 期）取，不能在 start() 里取 */
   const lib = useTrackLibrary()
@@ -215,20 +218,31 @@ export function useDemoRunner(state: DemoStateApi, recordsApi: DemoRecordsApi) {
        */
       run.value.error = routeIsFree
         ? '本机还没有可用的几何：本任务「服务端未下发线路（不指定路线）」，轨迹只能用你自己画的几何生成。' +
-          '请先去「我的场地 → 非官方路径【测试】」画一条并保存到本机（或去「跑道编辑」描好内外圈保存），回到本页即可开跑。'
+          '请先去「我的场地 → 研途健行路径编辑器」画一条并保存到本机（或去「跑道编辑」描好内外圈保存），回到本页即可开跑。'
         : '这条线路还没描过跑道：本版只允许用你自己描的跑道生成轨迹（官方模板偏十几到几十米）。' +
           '请去「跑道编辑」选这条线路 → 「快速定位」→ 沿卫星图描外圈 → 保存（本机）。'
       return
     }
 
-    // 真实感规划：里程**略超**任务要求（2%~9%）、配速**非整分钟**且夹紧在任务窗口内。
-    // 这样提交的数值是 3.41km / 20:34 / 6'02" 这种，而不是 3.20 / 16:00 / 5'00"（一眼假）。
+    // 真实感规划：里程**略超**任务要求（+0.3%~+4.0%）、配速**非整分钟**且**落在任务允许区间内**。
+    // ⚠️ 2026-09-29（issue #13）：配速不再是"基线 ±3% 再夹到边界"（那会让每次提交都是同一个边界值），
+    //    改由 `planRealisticRun` 的 `runPaceWindow()` + `sampleRunPace()` 在**交集内采样**
+    //    （口径与"任务允许区间"的显示同源，见 `utils/mp/realism.ts`）。
     // ⚠️ 阳光跑分支一定已经有 task（上面刚校验过），这里显式收窄类型，避免 TS 认为可能为 null。
     const sunrunTask = task.value
+    /**
+     * 🆕 2026-09-29（用户口径"相关的路径设置放在奔跑界面进行设置以及规定"）：
+     * **研途健行（未下发线路的任务）的目标里程**可以由用户在跑步页改 —— `ytuTargetKm` 是覆盖值，
+     * `null` / 非法 = 用**任务自己下发的 `mileage`**（正常路径）。
+     * ⚠️ 它只决定"本地生成多长的轨迹"，**提交报文的字段口径一个字都不变**。
+     */
+    const requiredKmForThisRun = isSunRun
+      ? clampYtuTargetKm(ytuTargetKm.value ?? sunrunTask?.mileage ?? 0, Number(sunrunTask?.mileage) || YTU_TARGET_KM_FALLBACK)
+      : 0
     const plan: RunPlan =
       isSunRun && sunrunTask
         ? planRealisticRun({
-            requiredKm: Number(sunrunTask.mileage) || 3,
+            requiredKm: requiredKmForThisRun,
             minSpeedKmh: sunrunTask.minSpeed,
             maxSpeedKmh: sunrunTask.maxSpeed,
             minMinutes: sunrunTask.minTime,

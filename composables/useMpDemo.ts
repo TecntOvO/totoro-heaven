@@ -65,6 +65,18 @@ export function useMpDemo() {
      */
     freeRunKm: state.freeRunKm,
     setFreeRunKm: state.setFreeRunKm,
+    /**
+     * 🆕 2026-09-29（issue #13 + 用户口径"路径设置放在奔跑界面"）：
+     * **研途健行（服务端未下发线路的任务）的目标里程与圈数** —— 与 `freeRunKm` 同一套做法
+     * （归一化收口在 `utils/mp/ytuRun.ts`，落盘记住上次的值），但**是另一对数**：
+     *   · `ytuTargetKm` = `null` 表示"用任务下发的 mileage"（正常路径），非 `null` 才是用户改过的值；
+     *   · `ytuLaps` = `null` 表示"没填 ⇒ 由 目标里程 ÷ 一圈 自动算"。
+     * ⚠️ 它们只决定**本地生成多长的轨迹**，提交报文口径一个字都不变。
+     */
+    ytuTargetKm: state.ytuTargetKm,
+    setYtuTargetKm: state.setYtuTargetKm,
+    ytuLaps: state.ytuLaps,
+    setYtuLaps: state.setYtuLaps,
     records: records.records,
     term: records.term,
     stats: records.stats,

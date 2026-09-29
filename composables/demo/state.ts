@@ -26,6 +26,16 @@ import type { LatLng } from '~/utils/mp/routeSimilarity'
 import type { RunPlan } from '~/utils/mp/realism'
 import type { TaskCheckResult } from '~/utils/mp/taskRules'
 import { FREE_RUN_KM_DEFAULT, FREE_RUN_KM_KEY, clampFreeRunKm, parseStoredFreeRunKm } from '~/utils/mp/freeRun'
+// 🆕 2026-09-29（issue #13）：研途健行的"目标里程 / 圈数"与本机记忆（纯逻辑层，含唯一归一化入口）
+// ⚠️ 这里**故意不导入** `parseStoredYtuTargetKm`：它是"必须给个数"的变体，而 state 初始化要区分
+//    "没设过"（`null` ⇒ 用任务里程）⇒ 用下面那个 `parseStoredYtuTargetKmOrNull()`。
+import {
+  YTU_LAPS_KEY,
+  YTU_TARGET_KM_KEY,
+  clampYtuTargetKm,
+  normalizeYtuLaps,
+  parseStoredYtuLaps,
+} from '~/utils/mp/ytuRun'
 import { DEMO_LINES, DEMO_TASK } from '~/src/mp/demo'
 
 export type RunStatus = 'idle' | 'running' | 'paused' | 'finished'
@@ -160,6 +170,19 @@ export interface DemoStateHooks {
   stopRunTimer: () => void
 }
 
+/**
+ * 🆕 2026-09-29：读"研途健行目标里程"的落盘值 —— **空 = 没设过（`null`）**。
+ *
+ * ⚠️ 与 `parseStoredYtuTargetKm()` 的区别必须说清（用错会把"没设过"变成"设成了 3.00"）：
+ *   · `parseStoredYtuTargetKm()` 用于"**必须给个数**"的场合（兜底成任务里程 / 3.00）；
+ *   · 本函数用于"**要区分有没有设过**"的场合（state 初始化）—— 没设过返回 `null`，
+ *     跑步页据此改用**任务下发的 `mileage`**（那才是正常路径）。
+ */
+function parseStoredYtuTargetKmOrNull(raw: string | null | undefined): number | null {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null
+  return clampYtuTargetKm(String(raw).trim())
+}
+
 export function useDemoState(hooks: DemoStateHooks) {
   const { session, clearSession, isLoggedIn } = useMpSession()
 
@@ -242,6 +265,8 @@ export function useDemoState(hooks: DemoStateHooks) {
     task.value = null
     lines.value = []
     run.value = createRunState()
+    ytuTargetKm.value = null
+    ytuLaps.value = null
     hooks.resetRecords()
   }
 
@@ -259,6 +284,71 @@ export function useDemoState(hooks: DemoStateHooks) {
     lines.value = next
   }
 
+  /**
+   * 🆕 2026-09-29（issue #13 + 用户口径"相关的路径设置放在奔跑界面进行设置以及规定"）：
+   * **研途健行（服务端未下发线路的任务）的目标里程覆盖值**。
+   *
+   * 三条口径（与 `freeRunKm` 同一套做法，但**是另一个数**，别合并）：
+   *   ① 默认 `null` = **没有覆盖** ⇒ 用**任务自己下发的 `mileage`**（这才是"与任务一致"的正常路径）；
+   *      用户一旦在跑步页改过，就记成具体公里数（键 `mp_ytu_target_km`，刷新/重启都在）；
+   *   ② 写入一律过 `clampYtuTargetKm`（区间 0.1~42.2、两位小数）—— 界面不自己判合法性；
+   *   ③ ⚠️ **换任务不会自动清掉覆盖值**（本机设置按人记，不按任务记）；跑步页会把
+   *      "任务里程 vs 本次目标" **并排显示**出来，用户一眼能看出差别、也能一键改回来。
+   *      （「一键清空本机数据」会把它一起清掉 —— 那才是"把本机设置归零"的地方。）
+   */
+  const ytuTargetKm = useState<number | null>('mpYtuTargetKm', () => {
+    if (!import.meta.client) return null
+    try {
+      return parseStoredYtuTargetKmOrNull(localStorage.getItem(YTU_TARGET_KM_KEY))
+    } catch {
+      /* localStorage 被禁用（隐私模式）：视为"没设过" ⇒ 用任务里程，不必打扰用户 */
+      return null
+    }
+  })
+  /** 设定/清除研途健行目标里程（`null` = 恢复"用任务下发的里程"）；返回归一化后的值 */
+  const setYtuTargetKm = (raw: unknown): number | null => {
+    const km = raw === null || raw === undefined || String(raw).trim() === '' ? null : clampYtuTargetKm(raw)
+    ytuTargetKm.value = km
+    if (!import.meta.client) return km
+    try {
+      if (km === null) localStorage.removeItem(YTU_TARGET_KM_KEY)
+      else localStorage.setItem(YTU_TARGET_KM_KEY, String(km))
+    } catch {
+      /* 配额满/隐私模式：内存里已生效，只是"下次开程序"记不住 —— 尽力而为，可静默 */
+    }
+    return km
+  }
+
+  /**
+   * 🆕 2026-09-29：**研途健行的圈数/趟数覆盖值**（`null` = 没填 ⇒ 由"目标里程 ÷ 一圈"自动算）。
+   *
+   * ⚠️ 圈数**只决定目标里程**（`里程 = 圈数 × 一圈`），不是另开一条口径：
+   *    跑步引擎认的永远是 `targetKm`（生成器按它绕几何），这样"圈数"与"里程"不会各说各话。
+   */
+  const ytuLaps = useState<number | null>('mpYtuLaps', () => {
+    if (!import.meta.client) return null
+    try {
+      return parseStoredYtuLaps(localStorage.getItem(YTU_LAPS_KEY))
+    } catch {
+      /* 同上：读不到就当作没填，界面按自动值显示 */
+      return null
+    }
+  })
+
+  /** 设定/清除研途健行圈数（`null` = 恢复自动）；返回归一化后的值 */
+  const setYtuLaps = (raw: unknown): number | null => {
+    const laps = normalizeYtuLaps(raw)
+    ytuLaps.value = laps
+    if (!import.meta.client) return laps
+    try {
+      if (laps === null) localStorage.removeItem(YTU_LAPS_KEY)
+      else localStorage.setItem(YTU_LAPS_KEY, String(laps))
+    } catch {
+      /* 尽力而为：记不住不影响本次运行 */
+    }
+    return laps
+  }
+
   const logout = () => {
     hooks.stopRunTimer()
     clearSession()
@@ -274,6 +364,10 @@ export function useDemoState(hooks: DemoStateHooks) {
     run,
     freeRunKm,
     setFreeRunKm,
+    ytuTargetKm,
+    setYtuTargetKm,
+    ytuLaps,
+    setYtuLaps,
     enableDemo,
     disableDemo,
     clearLocalData,

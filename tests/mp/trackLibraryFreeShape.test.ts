@@ -86,7 +86,7 @@ test('⭐⭐ **向后兼容**：老 `{kind:\'line\'}` 条目读进来 = 等价�
   /** 再写一轮（= 保存时 upsert 写回的就是这份数据）后仍然稳定 */
   const again = normalizeLibrary(JSON.parse(JSON.stringify(out)), '1.2.5')
   assert.deepEqual(again[0]!.freeShape, out[0]!.freeShape)
-  assert.deepEqual(entryDetailRows(again[0]!).find((r) => r.label.includes('非官方路径'))?.value, entryDetailRows(out[0]!).find((r) => r.label.includes('非官方路径'))?.value)
+  assert.deepEqual(entryDetailRows(again[0]!).find((r) => r.label.includes('研途健行路径'))?.value, entryDetailRows(out[0]!).find((r) => r.label.includes('研途健行路径'))?.value)
 })
 
 test('normalizeLibrary：**老条目（没有 freeShape）零变化** —— 不多出这个键、校验口径不变', () => {
@@ -102,9 +102,9 @@ test('normalizeLibrary：**老条目（没有 freeShape）零变化** —— 不
    * （那种任务永远不会有 freeShape）。判据：行数由数据决定。
    */
   assert.equal(
-    entryDetailRows(out[0]!).some((r) => r.label.includes('非官方路径')),
+    entryDetailRows(out[0]!).some((r) => r.label.includes('研途健行路径')),
     false,
-    '没有 freeShape 的条目，详情表里不许出现"非官方路径"那一行',
+    '没有 freeShape 的条目，详情表里不许出现"研途健行路径"那一行',
   )
 })
 
@@ -148,7 +148,7 @@ test('entrySummaryText / entryDetailRows：有形状时标出形状，且说明"
     freeShape: curve,
   }
   assert.match(entrySummaryText(e), /^圈型（闭合曲线）：4 个点 · 一圈 /)
-  const row = entryDetailRows(e).find((r) => r.label.includes('非官方路径'))
+  const row = entryDetailRows(e).find((r) => r.label.includes('研途健行路径'))
   assert.ok(row, '详情里要有一行说明非官方路径')
   assert.match(row.value, /圈型（闭合曲线）/)
 })

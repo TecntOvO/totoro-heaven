@@ -320,7 +320,7 @@ export function evaluateRunGate(input: RunGateInput): RunGateResult {
         if (input.localGeometryReady === false) {
           hit(
             'no_local_geometry',
-            '这台电脑还没有可用的本机路径几何（本任务未下发线路）：轨迹没法生成 —— 请先在「非官方路径【测试】」画一条。',
+            '这台电脑还没有可用的本机路径几何（本任务未下发线路）：轨迹没法生成 —— 请先在「研途健行路径编辑器」画一条。',
           )
         }
       } else {

@@ -3,6 +3,46 @@
     <RunGateNotice :gate-status="gateStatus" :is-logged-in="isLoggedIn" />
 
     <!--
+      🆕 2026-09-29（用户口径第 1 条："启动时进行识别并提示"）：
+      认出来了这是「服务端未下发线路」的任务（研究生院「研途健行」就是这一类）⇒ 主动提示一句该用哪个页。
+      ⚠️ 两条纪律：
+       ① 通用判据（`routeRequirementOf(task).kind === 'free'`），不是白名单 —— 任何学校只要任务没下发线路
+          都走这一套；文案里报的是实际读到的任务名/学校，不写死"研途健行"三个字。
+       ② 只在"站错页"时提示：人已经在 `/runs/ytu` 上就不必再说"去 /runs/ytu"（那是噪音）；
+          在阳光跑页提示时顺便给一键切过去的入口（点它即可，不用自己找小标签）。
+    -->
+    <v-alert v-if="routeIsFree && activeTask && !isYtuTab" type="info" variant="tonal" density="comfortable" class="mb-3">
+      <div class="font-weight-bold">
+        <v-icon class="mr-1" size="18">mdi-run-fast</v-icon>认出来了：这是「未下发线路」的任务（{{ ytuTaskLabel }}）—— 建议用「研途健行」页
+      </div>
+      <div class="text-body-2 mt-1">
+        本任务「服务端未下发线路」（<code>runPointList</code> 为空）⇒ 没有服务端线路可选，轨迹用<b>你自己画的路径</b>生成。
+        「跑步 → <b>研途健行</b>」那一页就是为此准备的：<b>跑多长 / 绕几圈 / 什么配速</b>在那里统一设置与规定。
+        本页（阳光跑）也能跑，但设置项不在这一页。
+      </div>
+      <div class="mt-2">
+        <v-btn size="small" color="primary" variant="flat" prepend-icon="mdi-run-fast" to="/runs/ytu">
+          切到「研途健行」页
+        </v-btn>
+      </div>
+    </v-alert>
+    <!-- 已经在正确的页上：确认一句"识别到了"，并说明这一页与阳光跑的关系（用户要求"识别并提示"） -->
+    <v-alert v-else-if="routeIsFree && activeTask && isYtuTab" type="success" variant="tonal" density="compact" class="mb-3">
+      <div class="font-weight-bold">
+        <v-icon class="mr-1" size="18">mdi-check-circle-outline</v-icon>已识别为「研途健行」类任务（{{ ytuTaskLabel }}）
+      </div>
+      <div class="text-body-2 mt-1">
+        本任务服务端未下发线路 ⇒ 这里用<b>你画的路径</b>生成轨迹；提交口径与阳光跑<b>完全相同</b>
+        （带任务号、不带线路标识）。设置项在右侧「路径与配速设置」。
+      </div>
+    </v-alert>
+    <!-- 走到"研途健行"页、但当前任务其实有官方线路 ⇒ 如实说明这一页不适用（不骗人、也不硬拦） -->
+    <v-alert v-if="isYtuTab && activeTask && !routeIsFree" type="warning" variant="tonal" density="compact" class="mb-3">
+      当前任务<b>下发了官方线路</b>（{{ routeReq.lineCount }} 条）—— 「研途健行」页是给「未下发线路」的任务用的。
+      这个任务请回「<b>阳光跑</b>」页，按你在「跑道编辑」里描好的跑道跑。
+    </v-alert>
+
+    <!--
       🆕 2026-09-22（真实用户实测）：**任务是从本机缓存恢复来的** ⇒ 顶部如实说明 + 一键「重新读取」。
       为什么必须说清：用户刷完页面看到"请先读取真实账号和任务"会以为程序坏了（他反复撞上）；
       而"恢复"只能拿到缓存里的东西 —— **开跑开关与摄像头杆不在缓存里**，所以真实提交前必须再读一次
@@ -140,8 +180,23 @@
               <span class="text-caption text-warning">⚠️ {{ freeRouteReason }}</span>
             </div>
             <!--
+              🆕 2026-09-29（用户口径"老版本路径文件提示需要更新"）：本次实际要用的这条本机几何是老版本的
+              ⇒ 如实提示 + 一键去重画（不自动迁移、不删任何数据；旧几何照样能用，照旧开跑）。
+              ⚠️ 判据与「研途健行路径编辑器」同一个纯函数（`legacyFreePathUpdate`）。
+            -->
+            <v-alert v-if="routeIsFree && freeRouteLegacy.legacy" type="info" variant="tonal" density="compact" class="mb-2">
+              <div class="font-weight-bold">老版本路径：建议重画一条（{{ freeRouteLegacy.detail }}）</div>
+              <div class="text-body-2 mt-1">
+                这条几何仍然能用（本次就照它生成轨迹），但它是旧版本保存的格式，拿不到新口径
+                （起跑点是你标的第 1 个点、跑多长/绕几圈在下面统一设）。我们不会替你自动迁移，也不会删掉旧数据。
+              </div>
+              <v-btn size="x-small" variant="flat" color="primary" class="mt-2" prepend-icon="mdi-vector-curve" :to="freeRouteLegacyDrawHref">
+                去「研途健行路径编辑器」重画
+              </v-btn>
+            </v-alert>
+            <!--
               🆕 2026-09-23（pre3，用户要求"弄一个一键跳转按钮"）：
-              · 本机**没有**可用几何 ⇒ 这是**主按钮**（最显眼）：一键跳到「非官方路径【测试】」并自动进入"圈型"绘制模式；
+              · 本机没有可用几何 ⇒ 这是主按钮（最显眼）：一键跳到「研途健行路径编辑器」并自动进入"圈型"绘制模式；
               · 已经有可用几何 ⇒ 降级为次级入口（下拉默认已经选中一条可用的，不需要用户再点）。
             -->
             <div v-if="routeIsFree" class="mb-2">
@@ -152,7 +207,7 @@
                 prepend-icon="mdi-vector-curve"
                 :to="freePathDrawHref"
               >
-                {{ freeRouteHasUsable ? '去「非官方路径【测试】」画/改' : '一键去画一条本机路径' }}
+                {{ freeRouteHasUsable ? '去「研途健行路径编辑器」画/改' : '一键去画一条本机路径' }}
               </v-btn>
             </div>
             <!-- 跨校区提示：选了别的校区的线路（按坐标判定，不看名称） -->
@@ -228,12 +283,103 @@
               :disabled="run.status === 'running'"
               class="mb-2"
             />
+            <!--
+              🆕 2026-09-29（GitHub issue #13，用户口径）：服务端未下发线路的任务（研究生院「研途健行」）
+              ⇒ 这里给出「路径与配速设置」：跑多长 / 绕几圈 / 什么配速，都在跑步页右侧定
+              （路径编辑器只管"指定路径"，不再设长度）。
+
+              ⚠️ 三个数字必须与跑步引擎同源：本块只用纯函数（`clampYtuTargetKm` / `runPaceWindow` /
+              `ytuRunPreview`），引擎那边用的是同一批函数 + 同一个 `ytuTargetKm` 状态。
+              ⚠️ 它只决定本地生成多长的轨迹：提交报文口径一个字都没变（`lineId` 仍空串、`paperId` 仍任务号）。
+            -->
+            <div v-if="isSunRun && routeIsFree" class="mb-3">
+              <v-divider class="mb-3" />
+              <div class="text-subtitle-2 mb-2 d-flex align-center flex-wrap ga-2">
+                <v-icon size="18" color="primary">mdi-map-marker-path</v-icon>
+                路径与配速设置
+                <v-chip v-if="isYtuTab" size="x-small" variant="tonal" color="primary">研途健行</v-chip>
+              </div>
+              <v-alert type="info" variant="tonal" density="compact" class="mb-2">
+                本任务「服务端未下发线路」⇒ 轨迹用你在「<b>研途健行路径编辑器</b>」画的路径生成。
+                下面三项决定<b>本次跑多长 / 绕几圈 / 用什么配速</b>；<b>起跑点固定是你标的第 1 个点</b>。
+              </v-alert>
+              <v-text-field
+                v-model="ytuKmText"
+                type="number"
+                :min="YTU_TARGET_KM_MIN"
+                :max="YTU_TARGET_KM_MAX"
+                :step="YTU_TARGET_KM_STEP"
+                suffix="km"
+                label="目标里程（本次要跑多远）"
+                density="comfortable"
+                :disabled="isBusy"
+                hide-details="auto"
+                @change="applyYtuKm(ytuKmText)"
+              />
+              <div class="text-caption text-medium-emphasis mt-1 mb-2">
+                任务下发的里程是 <b>{{ taskMileageKm > 0 ? formatYtuTargetKm(taskMileageKm) + ' km' : '（任务没给）' }}</b>
+                <template v-if="ytuKmOverridden">
+                  　·　<b class="text-warning">你改过（与任务不同）</b>
+                  <v-btn size="x-small" variant="text" class="ml-1" prepend-icon="mdi-undo" @click="useTaskMileage">用任务里程</v-btn>
+                </template>
+                <template v-else>　·　与任务一致</template>
+              </div>
+              <v-text-field
+                v-model="ytuLapsText"
+                type="number"
+                min="1"
+                step="1"
+                :placeholder="ytuLapEstimate === null ? '先画一条路径' : String(ytuLapEstimate)"
+                label="圈数 / 趟数（留空＝按目标里程自动算）"
+                density="comfortable"
+                :disabled="isBusy"
+                hide-details="auto"
+                @change="applyYtuLaps(ytuLapsText)"
+              />
+              <div class="text-caption text-medium-emphasis mt-1 mb-2">
+                <template v-if="selectedLaneLengthM > 0">
+                  你画的这条路径（{{ freeModeLabelForPath }}）一圈约 <b>{{ Math.round(selectedLaneLengthM) }} m</b>
+                  <template v-if="ytuLapEstimate !== null">　·　按目标里程约 <b>{{ ytuLapEstimate }}</b> 圈/趟</template>
+                  · 改圈数会<b>同时改上面的目标里程</b>（口径：里程 = 圈数 × 一圈）
+                </template>
+                <template v-else>
+                  ⚠️ 这条几何还没有可用的"一圈长度"（先去「研途健行路径编辑器」画一条路径再回来）
+                </template>
+                <v-btn v-if="ytuLaps !== null" size="x-small" variant="text" class="ml-1" prepend-icon="mdi-undo" @click="clearYtuLaps">
+                  恢复自动
+                </v-btn>
+              </div>
+              <v-select
+                v-model="run.paceSecPerKm"
+                :items="paceItems"
+                item-title="label"
+                item-value="value"
+                label="配速策略（基线，实际按任务允许区间采样）"
+                density="comfortable"
+                :disabled="isBusy"
+                class="mb-1"
+              />
+              <div class="text-caption text-medium-emphasis mb-2">{{ ytuWindowText }}</div>
+              <v-alert type="success" variant="tonal" density="compact" class="mb-2">
+                <div class="font-weight-bold">本次将生成</div>
+                <div class="text-body-2 mt-1">
+                  配速 <b>{{ ytuPreview.paceText }} /km</b>　·　时长 <b>{{ formatDuration(ytuPreview.durationSeconds) }}</b>　·　
+                  速度 <b>{{ ytuPreview.speedKmh.toFixed(1) }} km/h</b>　·　里程 <b>{{ formatYtuTargetKm(ytuPreview.km) }} km</b>
+                </div>
+                <div class="text-caption mt-1">
+                  开跑时会在这个区间内重新采样一次（所以每次跑的数都不一样，但始终落在任务允许范围内）。
+                </div>
+              </v-alert>
+            </div>
+
+            <!-- 其余（非"未下发线路"的）任务：配速策略只有一个下拉，口径与旧版一致 -->
             <v-select
+              v-if="!routeIsFree"
               v-model="run.paceSecPerKm"
               :items="paceItems"
               item-title="label"
               item-value="value"
-              label="配速策略（基线，实际会±3%浮动）"
+              label="配速策略（基线，实际按任务允许区间采样）"
               density="comfortable"
               :disabled="isBusy"
               class="mb-3"
@@ -297,14 +443,14 @@
             轨迹将用你<b>本机已有的跑道几何</b>生成；提交时<b>只带任务号、不带线路标识</b>。
           </template>
           <template v-else>
-            本机<b>一条都没画过</b> —— 我们总得有个几何才能生成轨迹：请先去「<b>我的场地 → 非官方路径【测试】</b>」
+            本机<b>一条都没画过</b> —— 我们总得有个几何才能生成轨迹：请先去「<b>我的场地 → 研途健行路径编辑器</b>」
             画一条（圈型 / 折线型都行）并保存到本机，回到本页即可开跑。
           </template>
         </div>
         <!--
           🆕 2026-09-22（用户反馈："画完回跑步页看不到自己被没被用上"）：
           **把"用哪一条"说清楚** —— 名称 + 形状与一圈长度（`localEntryGeometryText`，与跑步引擎同源读数）
-          ＋ 判据自己给出的那句依据（`freeRouteGeometryChoice().reason`：优先「非官方路径」保存的那条，
+          ＋ 判据自己给出的那句依据（`freeRouteGeometryChoice().reason`：优先本机路径编辑器里保存的那条，
           没有它才退回"最近保存的那条"，此时 `freeRouteIsFallback` 为真 ⇒ 用警告色把话说透）。
         -->
         <div v-if="freeRouteEntry" class="text-body-2 mt-1">
@@ -314,12 +460,12 @@
         <div v-if="freeRouteEntry" class="text-caption mt-1" :class="freeRouteIsFallback ? 'text-warning' : 'text-medium-emphasis'">
           <b>选它的依据</b>：{{ freeRouteReason }}
           <template v-if="!freeRouteIsFallback">
-            （想换一条：去「我的场地 → 非官方路径【测试】」重新保存即可）
+            （想换一条：去「我的场地 → 研途健行路径编辑器」重新保存即可）
           </template>
         </div>
         <div v-if="libTotal === 0" class="mt-2 d-flex flex-wrap ga-2">
           <v-btn size="small" color="primary" variant="flat" prepend-icon="mdi-vector-curve" to="/field/free-path">
-            去「非官方路径【测试】」画一条
+            去「研途健行路径编辑器」画一条
           </v-btn>
           <v-btn size="small" variant="tonal" prepend-icon="mdi-vector-polyline" to="/field/track-editor">
             或去「跑道编辑」描内外圈
@@ -671,7 +817,18 @@
           <v-list density="compact">
             <v-list-item title="线路" :subtitle="routeIsFree ? '本任务未下发线路（不指定路线）' : selectedLineName" prepend-icon="mdi-map-marker-path" />
             <v-list-item title="里程" :subtitle="`${run.result?.km.toFixed(2)} km（任务要求 ${activeTask?.mileage ?? '—'} km）`" prepend-icon="mdi-map-marker-distance" />
-            <v-list-item title="时长 / 配速" :subtitle="`${formatDuration(run.result?.durationSeconds ?? 0)} · ${formatPace(Math.round((run.result?.durationSeconds ?? 1) / Math.max(0.01, run.result?.km ?? 1)))}/km`" prepend-icon="mdi-timer-outline" />
+            <!--
+              ⚠️ 2026-09-29（issue #13 的第二个抱怨："右下角的配速无效"）：这一行原来拿
+              `时长 ÷ 里程` **现算**一个配速 —— 那个数与"本次实际用的配速"不是同一个来源，
+              小数与四舍五入都会差一点点，用户看着就像"配速不对"。
+              现在改成**与本次实际配速同源**：`run.result.plan.paceSecPerKm`（引擎结算时写进去的那个值），
+              只有它缺失（老记录/异常）时才退回按 时长 ÷ 里程 反算。
+            -->
+            <v-list-item
+              title="时长 / 配速"
+              :subtitle="`${formatDuration(run.result?.durationSeconds ?? 0)} · ${formatPace(settledPaceSecPerKm)}/km`"
+              prepend-icon="mdi-timer-outline"
+            />
             <!-- 🆕 2026-09-22（issue #12）：阈值口径取自纯函数 `fitRequirementOf()` ——
                  服务端未下发阈值时如实写"未下发"（客观事实），不再拿历史兜底 0.6 冒充"要求"。 -->
             <v-list-item title="拟合度" :subtitle="`${run.result?.fitDegree.toFixed(2)}（${fitRequirementText}）`" prepend-icon="mdi-chart-bell-curve" />
@@ -720,6 +877,7 @@ import { useMpDemo } from '~/composables/useMpDemo'
 import {
   entryGeometryUsable,
   freeRouteGeometryChoice,
+  legacyFreePathUpdate,
   localEntryGeometryText,
   localEntryShapeText,
   resolveEntryName,
@@ -747,9 +905,42 @@ import {
   estimateLaps,
   formatFreeRunKm,
 } from '~/utils/mp/freeRun'
+// 🆕 2026-09-29（GitHub issue #13）：「研途健行」的目标里程/圈数/配速预览（纯逻辑层，含唯一归一化入口）
+import {
+  YTU_TARGET_KM_FALLBACK,
+  YTU_TARGET_KM_MAX,
+  YTU_TARGET_KM_MIN,
+  YTU_TARGET_KM_STEP,
+  clampYtuTargetKm,
+  formatYtuTargetKm,
+  normalizeYtuLaps,
+  paceWindowText,
+  ytuRunPreview,
+} from '~/utils/mp/ytuRun'
+// 🆕 2026-09-29（issue #13）：配速**在任务允许区间内采样**（本次实际配速与"任务允许区间"同源）
+import { newRunSeed, planRealisticRun, runPaceWindow } from '~/utils/mp/realism'
 
-const { isLoggedIn, task, run, progress, paceText, start, pause, resume, finish, reset, demoMode, enableDemo, freeRunKm, setFreeRunKm } =
-  useMpDemo()
+const {
+  isLoggedIn,
+  task,
+  run,
+  progress,
+  paceText,
+  start,
+  pause,
+  resume,
+  finish,
+  reset,
+  demoMode,
+  enableDemo,
+  freeRunKm,
+  setFreeRunKm,
+  /** 🆕 2026-09-29（issue #13）：研途健行的"目标里程 / 圈数"覆盖值（`null` = 用任务里程 / 自动算） */
+  ytuTargetKm,
+  setYtuTargetKm,
+  ytuLaps,
+  setYtuLaps,
+} = useMpDemo()
 const {
   profile: realProfile,
   task: realTask,
@@ -793,6 +984,18 @@ const shortKmOpen = ref(false)
 
 /** 本次结算的**实际累计里程**（公里；未结算 ⇒ 0） */
 const settledKm = computed(() => Number(run.value?.result?.km ?? 0))
+/**
+ * 🆕 2026-09-29（issue #13 的第二个抱怨："右下角的配速无效"）：**结算卡里显示的那个配速**。
+ *
+ * 唯一来源 = `run.paceSecPerKm`（开跑时由 `planRealisticRun` 写入、结算时算时长用的就是它），
+ * ⇒ **与"本轮实际生成的配速"逐字同源**，不再是"时长 ÷ 里程"现算出来的另一个数。
+ * 只有它异常（0/NaN，理论上不该发生）时才退回反算，保证这一行永远有数、不显示 `0'00"`。
+ */
+const settledPaceSecPerKm = computed(() => {
+  const p = Number(run.value?.paceSecPerKm ?? 0)
+  if (Number.isFinite(p) && p > 0) return p
+  return Math.round((run.value?.result?.durationSeconds ?? 0) / Math.max(0.01, run.value?.result?.km ?? 1))
+})
 /** 任务要求里程（公里）；字段缺失/为 0 ⇒ 不判、不打扰 */
 const requiredKm = computed(() => Number(activeTask.value?.mileage ?? 0))
 /** 还差多少公里（`> 0` = 没达标；达标或任务没写 mileage ⇒ 0，界面据此不弹框） */
@@ -885,10 +1088,19 @@ const freeRouteHasUsable = computed(() => libEntries.value.some((e) => entryGeom
 const freeRouteOptions = computed(() => {
   const usable = libEntries.value
     .filter((e) => entryGeometryUsable(e))
-    .map((e) => ({ title: `${resolveEntryName(e) || String(e.lineId)} —— ${localEntryShapeText(e)}`, value: String(e.lineId) }))
+    .map((e) => ({
+      title: `${resolveEntryName(e) || String(e.lineId)} —— ${localEntryShapeText(e)}${legacyFreePathUpdate(e).legacy ? '（旧版路径 · 建议重画）' : ''}`,
+      value: String(e.lineId),
+    }))
   if (usable.length) return usable
   return [{ title: '（还没有本机路径 · 点我去画一条）', value: FREE_ROUTE_DRAW_VALUE }]
 })
+/**
+ * 🆕 2026-09-29（用户口径"老版本路径文件提示需要更新"）：**本次实际要用的那条几何是不是老版本**。
+ * ⚠️ 判据与「研途健行路径编辑器」**同一个纯函数**（`legacyFreePathUpdate`）—— 两处提示必须说同一句话。
+ */
+const freeRouteLegacy = computed(() => legacyFreePathUpdate(freeRouteEntry.value))
+const freeRouteLegacyDrawHref = freePathDrawHref
 /**
  * 下拉的绑定值 = **这次实际会用的那条**（而不是"记忆里那条"）：
  * 用户改选 ⇒ 记住（按 taskId 持久化）；记忆里那条没了/坏了 ⇒ 显示落回后的那条，并在下面如实提示"上次那条已不可用"。
@@ -1218,12 +1430,180 @@ const speedItems = [
   { value: 60, label: '60×（约 21 秒）' },
   { value: 600, label: '600×（约 2 秒，看结果用）' },
 ]
-/** 配速策略（真实学生的常见区间；实际会 ±3% 浮动并夹紧到任务窗口） */
-const paceItems = [
+/** 配速策略（真实学生的常见区间；实际会按"任务允许区间"采样，见 utils/mp/realism.ts 的 sampleRunPace） */
+const PACE_PRESETS = [
   { value: 330, label: `5'30" /km（较快）` },
   { value: 360, label: `6'00" /km（常规）` },
   { value: 390, label: `6'30" /km（轻松）` },
-]
+] as const
+// ---------- 🆕 2026-09-29（GitHub issue #13）：研途健行的"路径与配速设置" ----------
+/**
+ * 本次判定的任务是不是**服务端未下发线路**的那种（研究生院「研途健行」）。
+ * 判据与门禁/自检/引擎**同源**：`routeRequirementOf(task).kind === 'free'`（上面已算好的 `routeIsFree`）。
+ * ⚠️ 通用条件，不是白名单：任何学校只要任务没下发线路，都走这一套（用户 2026-09-29 确认）。
+ */
+const isYtuTab = computed(() => runTab.value === 'ytu')
+/**
+ * 「识别到的是什么任务」给人看的一句话（**只报实际读到的字段**，读不到就如实说读不到）。
+ *
+ * ⚠️ 不许写死"研途健行"：判据是通用的（任何"未下发线路"的任务都走这一套），
+ *    研究生院那条只是其中一个实例 —— 所以这里按实际读到的任务名/学校组装。
+ */
+const ytuTaskLabel = computed(() => {
+  const name = String(activeTask.value?.paperName ?? '').trim()
+  const school = String(realProfile.value?.schoolName ?? '').trim()
+  if (name && school) return `${name} · ${school}`
+  if (name) return name
+  if (school) return school
+  return '任务名未读到'
+})
+/**
+ * 这一页是不是**阳光跑那一套**（`sunrun` 或 `ytu` 小标签）。
+ *
+ * ⚠️ 必须按"**排除自由跑**"来写，而不是 `runTab === 'sunrun'`：
+ *    新增 `ytu` 小标签之后，`=== 'sunrun'` 会让研途健行页**整个跑错分支**
+ *    （与 `isFreeTab` 是同一个坑的另一半，见 2026-09-20 那条纪律：
+ *     **路由判定读"末段 / 参数"，并且要覆盖所有合法的末段**）。
+ */
+const isSunRun = computed(() => !isFreeTab.value)
+/** 用户画的这条路径是"圈型"还是"折线型"（只影响措辞；判据仍来自本机几何） */
+const freeModeLabelForPath = computed(() => (freePathLapLengthM(freeRouteEntry.value?.freeShape) > 0 ? '圈型：绕一圈' : '折线型：一去一回'))
+/** 任务下发的里程（公里）；缺失/为 0 ⇒ 0（界面据此说"任务没给里程"） */
+const taskMileageKm = computed(() => Number(activeTask.value?.mileage ?? 0) || 0)
+/**
+ * **本次的目标里程**（公里）= `ytuTargetKm`（用户设过）否则任务的 `mileage`，再过唯一归一化入口。
+ * 它与跑步引擎 `runner.start()` 用的**是同一个函数、同一个来源**（否则"界面说 2.40、实际跑 3.00"）。
+ */
+const ytuTargetKmForUi = computed(() =>
+  clampYtuTargetKm(ytuTargetKm.value ?? taskMileageKm.value ?? 0, taskMileageKm.value || YTU_TARGET_KM_FALLBACK),
+)
+/** 是不是"用户改过目标里程"（界面据此显示"与任务里程不同"的如实提示） */
+const ytuKmOverridden = computed(() => ytuTargetKm.value !== null && Math.abs(ytuTargetKm.value - taskMileageKm.value) > 0.005)
+/** 输入框的本地文本态（⚠️ 与自由跑同一个理由：打一半就被夹紧会很难受，`@change` 才提交） */
+const ytuKmText = ref(formatYtuTargetKm(ytuTargetKmForUi.value, taskMileageKm.value || YTU_TARGET_KM_FALLBACK))
+/** 输入框的本地文本态（圈数；留空 = 自动） */
+const ytuLapsText = ref(ytuLaps.value === null ? '' : String(ytuLaps.value))
+/**
+ * 目标里程的文本态**跟着真实值走**（换任务 / 恢复缓存 / 按圈数换算都会改真实值）。
+ *
+ * ⚠️ 判据是"**文本态解析出来的数与真实值不同**"（而不是"文本串不同"）——
+ *    否则每敲一个字符都会被格式化回写（用户永远打不完 `2.` 这种中间态）。
+ */
+watch(ytuTargetKmForUi, (km) => {
+  const fb = taskMileageKm.value || YTU_TARGET_KM_FALLBACK
+  if (Math.abs(clampYtuTargetKm(ytuKmText.value, fb) - km) > 0.005) ytuKmText.value = formatYtuTargetKm(km, fb)
+})
+/** 圈数文本态同上：只在"真实值"与"文本解析值"不一致时才回写 */
+watch(ytuLaps, (laps) => {
+  if (normalizeYtuLaps(ytuLapsText.value) !== laps) ytuLapsText.value = laps === null ? '' : String(laps)
+})
+/**
+ * 开跑前预览用的种子：**每次进页/换任务换一个** —— 这样"本次将生成"不是一个固定值，
+ * 但也不会因为界面每次重算而乱跳（同一次任务里看到的数才是稳定的）。
+ */
+const ytuPreviewSeed = ref(newRunSeed())
+watch([() => activeTask.value?.taskId, () => activeTask.value?.paperId, () => activeTask.value?.mileage], () => {
+  ytuPreviewSeed.value = newRunSeed()
+})
+/**
+ * **任务的允许配速区间**（交集）+ 本次**将要生成**的三件套（配速 / 时长 / 速度）。
+ *
+ * ⚠️ 三个数字都来自纯函数（`runPaceWindow` / `ytuRunPreview`），**与跑步引擎同一处判据** ——
+ *    这正是 issue #13 里"右下角的配速无效"要修的那一条（旧实现是"时长 ÷ 里程"现算的，与配速字段不同源）。
+ */
+const ytuPaceWindow = computed(() =>
+  runPaceWindow(
+    {
+      requiredKm: ytuTargetKmForUi.value,
+      minSpeedKmh: activeTask.value?.minSpeed,
+      maxSpeedKmh: activeTask.value?.maxSpeed,
+      minMinutes: activeTask.value?.minTime,
+      maxMinutes: activeTask.value?.maxTime,
+    },
+    ytuTargetKmForUi.value,
+  ),
+)
+const ytuWindowText = computed(() => paceWindowText(ytuPaceWindow.value))
+/** 本次实际的配速（开跑后以 `run.plan` 为准；未开跑时按"当前策略 + 允许区间"**预演**一次，给用户预览） */
+const ytuPlannedPace = computed(() => {
+  const planned = run.value.plan?.paceSecPerKm
+  if (Number.isFinite(planned) && Number(planned) > 0) return Number(planned)
+  return Math.round(planRealisticRun({
+    requiredKm: ytuTargetKmForUi.value,
+    minSpeedKmh: activeTask.value?.minSpeed,
+    maxSpeedKmh: activeTask.value?.maxSpeed,
+    minMinutes: activeTask.value?.minTime,
+    maxMinutes: activeTask.value?.maxTime,
+    basePaceSecPerKm: run.value.paceSecPerKm,
+    seed: ytuPreviewSeed.value,
+  }).paceSecPerKm)
+})
+const ytuPreview = computed(() => ytuRunPreview(ytuTargetKmForUi.value, ytuPlannedPace.value, taskMileageKm.value || YTU_TARGET_KM_FALLBACK))
+/** 圈数（自动/手填都在这里算，界面只渲染它的结果） */
+const ytuLapEstimate = computed(() => estimateLaps(ytuTargetKmForUi.value, selectedLaneLengthM.value))
+/**
+ * 配速下拉的选项：三个常用档 + **本次实际会用的那个值**。
+ *
+ * ⚠️ 必须把"实际值"塞进选项里，否则 Vuetify 在列表里找不到它时会**回退显示原始秒数**
+ *    （issue #13 截图里那个"514"就是这么来的：`v-select` 对不在 items 里的值会 `transformItem` 成
+ *     `title = 值本身`，见 `vuetify/lib/composables/list-items.js` 的 "Not an existing item" 分支）。
+ */
+const paceItems = computed<{ value: number; label: string }[]>(() => {
+  const items: { value: number; label: string }[] = PACE_PRESETS.map((x) => ({ value: x.value, label: String(x.label) }))
+  const actual = run.value.paceSecPerKm
+  const planned = ytuPlannedPace.value
+  for (const p of [actual, planned]) {
+    if (!Number.isFinite(p) || p <= 0) continue
+    if (items.some((x) => x.value === p)) continue
+    items.unshift({ value: p, label: `${formatPace(p)} /km（本次实际会用这个）` })
+  }
+  return items
+})
+/**
+ * 「目标里程」改动 ⇒ 归一化并落盘（唯一入口 `clampYtuTargetKm`），返回值回写输入框
+ */
+const applyYtuKm = (raw: unknown) => {
+  const km = clampYtuTargetKm(raw, taskMileageKm.value || YTU_TARGET_KM_FALLBACK)
+  setYtuTargetKm(km)
+  ytuKmText.value = formatYtuTargetKm(km, taskMileageKm.value || YTU_TARGET_KM_FALLBACK)
+}
+/** 「用任务里程」一键恢复（把覆盖值清掉 ⇒ 回到 `null`，引擎与界面都改读任务 `mileage`） */
+const useTaskMileage = () => {
+  setYtuTargetKm(null)
+  ytuKmText.value = formatYtuTargetKm(taskMileageKm.value || YTU_TARGET_KM_FALLBACK, taskMileageKm.value || YTU_TARGET_KM_FALLBACK)
+  showSnackbar(taskMileageKm.value > 0 ? '已改回用任务下发的里程' : '任务没下发里程，已保持当前值', 'info')
+}
+/**
+ * 「圈数」改动 ⇒ **换算成目标里程**（`圈数 × 一圈`）再落盘。
+ *
+ * ⚠️ 口径（别改成"单独存一个圈数让引擎自己乘"）：跑步引擎认的只有 `targetKm`，
+ *    圈数只是它的一种**输入方式**（用户会更自然地说"我跑 3 圈"）。两处各算一遍必然分叉。
+ */
+const applyYtuLaps = (raw: unknown) => {
+  const laps = normalizeYtuLaps(raw)
+  if (laps === null) {
+    setYtuLaps(null)
+    ytuLapsText.value = ''
+    return
+  }
+  const lap = selectedLaneLengthM.value
+  if (!(lap > 0)) {
+    showSnackbar('这条本机几何还没有可用的"一圈长度"（先去「研途健行路径编辑器」画一条路径），没法按圈数换算里程', 'warning')
+    setYtuLaps(laps)
+    ytuLapsText.value = String(laps)
+    return
+  }
+  const km = clampYtuTargetKm((laps * lap) / 1000, taskMileageKm.value || YTU_TARGET_KM_FALLBACK)
+  setYtuLaps(laps)
+  setYtuTargetKm(km)
+  ytuLapsText.value = String(laps)
+  ytuKmText.value = formatYtuTargetKm(km, taskMileageKm.value || YTU_TARGET_KM_FALLBACK)
+}
+/** 圈数用"自动"（清掉覆盖值） */
+const clearYtuLaps = () => {
+  setYtuLaps(null)
+  ytuLapsText.value = ''
+}
 
 /**
  * 页面挂载：**先从本机缓存把任务恢复回来**（刷新后内存是空的），再把任务注入跑步机。

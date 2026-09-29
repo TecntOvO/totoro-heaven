@@ -318,5 +318,6 @@ test('🔴 未装载 ≠ 没有：localGeometryReady 省略/undefined ⇒ 不记
   )
   assert.equal(empty.allow, false, '确认没有几何 ⇒ 严格模式必须拦')
   assert.equal(empty.blockedBy, 'no_local_geometry')
-  assert.ok(empty.warnings[0]?.includes('非官方路径'), '提示要指路（去哪儿画一条）')
+  // ⚠️ 2026-09-29 改名（用户口径）：「非官方路径【测试】」→「研途健行路径编辑器」⇒ 指路文案跟着改
+  assert.ok(empty.warnings[0]?.includes('研途健行路径编辑器'), '提示要指路（去哪儿画一条）')
 })

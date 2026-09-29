@@ -277,8 +277,8 @@ export function freeRouteGeometryChoice(
       entry: localFree,
       fallback: false,
       reason: preferredUnavailable
-        ? `你上次选的那条已不可用（可能被删或几何不完整），已改用「非官方路径【测试】」保存的那条`
-        : '本任务未下发线路 ⇒ 用你在「非官方路径【测试】」保存的那条本机几何',
+        ? `你上次选的那条已不可用（可能被删或几何不完整），已改用「研途健行路径编辑器」保存的那条`
+        : '本任务未下发线路 ⇒ 用你在「研途健行路径编辑器」保存的那条本机几何',
       preferredUnavailable,
     }
   }
@@ -295,7 +295,7 @@ export function freeRouteGeometryChoice(
     fallback: true,
     reason: preferredUnavailable
       ? `你上次选的那条已不可用（可能被删或几何不完整），暂用最近保存的那条跑道几何`
-      : '本机还没有「非官方路径」形状 ⇒ 暂用最近保存的那条跑道几何；建议去「非官方路径【测试】」画一条',
+      : '本机还没有本机路径形状 ⇒ 暂用最近保存的那条跑道几何；建议去「研途健行路径编辑器」画一条',
     preferredUnavailable,
   }
 }
@@ -572,7 +572,7 @@ export function entryDetailRows(e: TrackRouteEntry): { label: string; value: str
      *    会凭空多一行 `非官方路径【测试】`，违反"有线路任务的所有既有行为一字不变"。
      *    判据：**行数由数据决定**，不由版本决定。
      */
-    ...(freePathShapeText(e.freeShape) ? [{ label: '非官方路径【测试】', value: String(freePathShapeText(e.freeShape)) }] : []),
+    ...(freePathShapeText(e.freeShape) ? [{ label: '研途健行路径', value: String(freePathShapeText(e.freeShape)) }] : []),
     { label: '内外圈点数', value: `外圈 ${e.outer.length} 点 · 内圈 ${e.inner.length} 点` },
     { label: '外圈周长', value: e.outer.length >= 3 ? `${Math.round(ringLengthM(e.outer))} m` : '—' },
     {
@@ -598,6 +598,68 @@ export function historyLogText(log: TrackEditLog): string {
   // 列表里用"版本未知"（与 `entrySummaryText` 同一措辞）；`versionText` 的"未记录"留给详情表
   const ver = log.appVersion ? versionText(log.appVersion) : '版本未知'
   return `${when} · ${ver} · ${log.summary || '（未记录改动内容）'}`
+}
+
+// ---------- 🆕 2026-09-29：老版本路径识别（用户口径"老版本路径文件提示需要更新"） ----------
+
+/**
+ * **老版本路径**的判定结果：给界面直接渲染用（`legacy` 为假时 `detail` 为空串）。
+ *
+ * ## 为什么要"提示更新"（用户 2026-09-29 口径）
+ * > "老版本路径文件提示需要更新"
+ *
+ * 本轮「研途健行路径编辑器」有两处变化：**长度/趟数不再由编辑器设置**、**起跑点固定用你标的第一个点**。
+ * 形状的数据格式本身**没有变**（`FreePathShape` 仍然只有 `kind` + `points`）⇒ **旧数据不会坏**，
+ * 但有两类本机记录确实"该更新"（判据见 `legacyFreePathUpdate`）：
+ *   ① **没有 `freeShape`**：1.2.5 之前根本没有"画路径"这个功能 ⇒ 这类记录是用**旧的占位几何**
+ *      或**内外双圈**在凑合（"未下发线路"的任务会拿它当几何跑）；
+ *   ② **有 `freeShape` 但 `outer` 与 `inner` 逐点相同**：那是 `freeShapePlaceholderRing()` 生成的
+ *      **占位几何**（给 1.2.4 及更早版本看的），用户从来没描过真正的圆。
+ *
+ * ## 三条纪律（照用户 2026-09-29 的选择：**提示 + 一键重画，不自动迁移**）
+ *   · 只**提示**：`legacy` 为真**不影响**这条记录能不能用（跑步页照旧会拿它生成轨迹）；
+ *   · **绝不自动迁移、绝不自动删除**任何本机数据（判定是**纯读**，不写回、不清洗）；
+ *   · ⚠️ 判据①**允许假阳性**（比如你确实描过两个一模一样的圈，或旧记录其实够用）——
+ *      所以文案必须写成"**建议**更新"，并且给「知道了，这次不改」这个出口，不制造"必须改"的压力。
+ */
+export interface LegacyFreePathUpdate {
+  /** 是不是"老版本路径"（建议更新） */
+  legacy: boolean
+  /** 给人看的一句依据（界面直接渲染；不是老版本时为空串） */
+  detail: string
+}
+
+/** 两串坐标是否**逐点相同**（占位几何的判据：`freeShapePlaceholderRing` 把同一份点放进 outer/inner） */
+function samePoints(a: LatLng[] | undefined, b: LatLng[] | undefined): boolean {
+  const x = Array.isArray(a) ? a : []
+  const y = Array.isArray(b) ? b : []
+  if (x.length < 3 || x.length !== y.length) return false
+  return x.every((p, i) => {
+    const q = y[i]!
+    return Number(p?.latitude) === Number(q?.latitude) && Number(p?.longitude) === Number(q?.longitude)
+  })
+}
+
+/**
+ * 判定一条本机记录是不是**老版本路径**（纯函数，可在跑步页与编辑器两处复用 —— **判据只能有一处**）。
+ * 没有记录（`undefined`）⇒ 不是老版本（那种情况界面该说的是"还没画过"，不是"该更新"）。
+ */
+export function legacyFreePathUpdate(entry: TrackRouteEntry | null | undefined): LegacyFreePathUpdate {
+  if (!entry || typeof entry !== 'object') return { legacy: false, detail: '' }
+  if (usableFreePathShape(entry.freeShape)) {
+    /** 有形状了 —— 除非它其实是"占位双圈"（outer 与 inner 逐点相同），否则就是新格式，不用提示 */
+    return samePoints(entry.outer, entry.inner)
+      ? {
+          legacy: true,
+          detail: '这条记录用的还是旧的占位几何（内外圈是同一份点），从来没在本页画过真正的路径',
+        }
+      : { legacy: false, detail: '' }
+  }
+  /** 没有 `freeShape`：旧版（1.2.5 之前）画的记录 —— 建议在本页画一条真正的路径 */
+  return {
+    legacy: true,
+    detail: '这条记录里没有本页画的路径形状，只有旧的几何（内外圈 / 占位几何）',
+  }
 }
 
 /**

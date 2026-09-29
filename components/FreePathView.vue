@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 「我的场地 → 非官方路径【测试】」页（2026-09-22 结构调整）
+ * 「我的场地 → 研途健行路径编辑器」页（2026-09-22 从跑道编辑搬出；2026-09-29 改名 + 缩减职责）
  *
  * ## 为什么它从跑道编辑页搬出来成了独立子页（用户原话）
  * > "非官方路径编辑放到与**签到区域**、**跑道编辑**同级的地方"
@@ -8,6 +8,16 @@
  * 原先它是 `components/TrackEditorView.vue` 右侧一张"只在任务未下发线路时才出现"的卡片；
  * 现在它自己占一个子页（`/field/free-path`），与「跑道编辑」「签到区域」并列（同一套
  * `components/TabGroupShell.vue` 外壳 + `pages/field/[tab].vue` 动态段，见该页顶部说明）。
+ *
+ * ## 🆕 2026-09-29（用户口径，两处调整）
+ *   ① **改名**：「非官方路径【测试】」→「**研途健行路径编辑器**」（用户原话："将非法路径编辑器重命名为
+ *      研途健行路径编辑器"）。⚠️ 只改**用户看得见的文案**，`/field/free-path`、tab key `free-path`、
+ *      固定存储键 `local:free` **一律保留**（零迁移风险：旧书签与旧数据都不动）。
+ *   ② **本页只负责"指定路径"**：目标里程与趟数**两个输入框已删除**，长度相关的实时数字也去掉了
+ *      （用户原话："路径长度不要进行设置，我们只是在那里指定路径而已，不要设置长度"）⇒
+ *      实际跑多长、绕几圈、用什么配速，**全部在跑步页右侧「路径与配速设置」里定**
+ *      （那边用的是与跑步引擎**同一套纯函数**，见 `components/RunWorkspace.vue`）。
+ *      起跑点 = **你标的第一个点**（用户口径），所以本页不再需要"回跑道编辑重设起跑点"那套说明。
  *
  * 搬家的两条硬要求（都做到了）：
  *   · **UI 只有这一份**：`TrackEditorView.vue` 里那张卡、地图上的洋红图层、图例、提示全删了，
@@ -21,19 +31,16 @@
  *   · 它**绝不会**进提交报文（提交用的是厂商线路 id，本机键进不去）。
  *
  * ## 算法一律走纯函数（界面不自己算）
- *   `utils/mp/pathShape.ts`（形状 / 长度 / 趟数 / 旧版本占位几何）、
+ *   `utils/mp/pathShape.ts`（形状合法性 / 长度 / 旧版本占位几何；长度现在只服务于"跑步页算圈数"）、
  *   `utils/mp/freePathGeometry.ts`（形状 + 起跑点 → 生成器几何的**唯一入口**，与跑步页同源 ⇒ 所见即所跑）、
- *   `utils/mp/trackLibrary.ts`（`localFreeTrackLine` / `LOCAL_FREE_LINE_ID` / 列表摘要与详情行）。
- *   **本轮没有改它们任何一行。**
+ *   `utils/mp/trackLibrary.ts`（`localFreeTrackLine` / `LOCAL_FREE_LINE_ID` / 列表摘要与详情行 /
+ *   **老版本路径识别** `legacyFreePathUpdate()`）。
  */
 import {
-  curveLengthM,
+  freePathPointCount,
   freePathPoints,
   freePathShapeText,
-  normalizeFreePathTrips,
   parseFreePathShape,
-  planFreePathTrips,
-  polylineShapeLengthM,
   usableFreePathShape,
   type FreePathShape,
 } from '~/utils/mp/pathShape'
@@ -54,7 +61,8 @@ import {
 import { buildFreeShapeSave, startClearedNote } from '~/utils/mp/freePathSave'
 // 「改回内外双圈」要判"记录上现存的这两圈到底合不合法" ⇒ 复用跑道编辑页同一套纯函数判据
 import { validateRings } from '~/utils/mp/trackEditor'
-import { LOCAL_FREE_LINE_ID, LOCAL_FREE_LINE_NAME, localFreeTrackLine } from '~/utils/mp/trackLibrary'
+// 🆕 2026-09-29（用户口径："老版本路径文件提示需要更新"）：老数据的识别与那句提示都在纯模块里（有单测）
+import { LOCAL_FREE_LINE_ID, LOCAL_FREE_LINE_NAME, legacyFreePathUpdate, localFreeTrackLine } from '~/utils/mp/trackLibrary'
 // 🆕 2026-09-22（真实用户实测）：本页对"有官方线路的任务"不生效 ⇒ 给一条直达「跑道编辑」的出路
 // 🆕 2026-09-23（pre3）：跑步页的「一键去画一条本机路径」会带 `?draw=curve` 进来 ⇒ 自动进"圈型"绘制模式
 import { drawModeFromQuery, trackEditorLink } from '~/utils/mp/routeGroups'
@@ -287,14 +295,16 @@ const draftFreePoints = ref<N[]>([])
  * 一趟 = 沿它去 + 原路返回（算法在 `expandFreePathTrajectory` 里展开，界面不自己拼）。
  */
 const draftPolyPoints = ref<N[]>([])
-/** 目标里程（km，用于"自动算趟数"）—— 默认 3.2，与既有轨迹预览的口径一致 */
-const freeTargetKm = ref(3.2)
 /**
- * 用户手填的趟数。
- * ⚠️ 类型故意放宽到 `string`：`v-model.number` 在**输入框被清空**时会把 `''` 写进来
- *    （不是 `null`）—— 声明成 `number | null` 只是骗自己，`normalizeFreePathTrips` 本来就收 `unknown`。
+ * 🆕 2026-09-29（用户口径："路径长度不要进行设置，我们只是在那里指定路径而已"）：
+ * **「目标里程」与「趟数」两个输入框已从这里删除**。
+ *
+ * 为什么删得不心疼：它们从来不是"画路径"的必要信息 ——
+ *   · 本页保存的形状（`FreePathShape`）**只有形状本身**（`kind` + `points`），**不含里程/趟数**；
+ *   · 「跑多长、绕几圈」由生成器（`generateCorridorRoute` 按 `targetKm` 反复绕几何）决定，
+ *     而 `targetKm` 来自**任务里程或用户设定**（现在统一在跑步页的「路径与配速设置」里）。
+ * ⇒ 删掉它们**不改变任何已保存的数据格式**，只是把这些参数挪到真正用它做事的那一页。
  */
-const freeTripsInput = ref<number | string | null>(null)
 
 /** 当前草稿构成的形状（`null` = 还没画够） */
 const draftFreeShape = computed<FreePathShape | null>(() => {
@@ -319,18 +329,14 @@ const freeDraftEmpty = computed(() => {
   if (freeMode.value === 'polyline') return draftPolyPoints.value.length === 0
   return true
 })
-/** 趟数计划（自动/手填都在这里算，界面只渲染它的结果） */
-const freePlan = computed(() => planFreePathTrips(draftFreeShape.value, freeTargetKm.value, freeTripsInput.value))
 /**
- * 手填的趟数是否**填错了**（审计 B7）。
- * ⚠️ **清空输入框（`''`）＝ "没填"**，不是"填错" —— 输入框标签写的就是"留空＝按目标里程自动算"，
- *    所以这里必须把空白排除掉，否则用户一清空就看到"不是有效正数"的自相矛盾提示。
+ * 🆕 2026-09-29（用户口径）：**本条本机记录是不是"老版本路径"**（需要更新/重画）。
+ *
+ * 判据在纯模块 `utils/mp/trackLibrary.ts` 的 `legacyFreePathUpdate()` —— 与跑步页**同一处判据**
+ * （两处提示必须说同一句话，否则又是"界面说 A、实际 B"）。
+ * ⚠️ 只是**提示**：绝不自动迁移、绝不自动删除任何本机数据（用户 2026-09-29 明确选择"提示 + 一键重画"）。
  */
-const freeTripsManualInvalid = computed(() => {
-  const raw = freeTripsInput.value
-  const blank = raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')
-  return !blank && normalizeFreePathTrips(raw) === null
-})
+const legacyUpdate = computed(() => legacyFreePathUpdate(entry.value))
 
 /** 当前画到哪儿了（给用户的实时反馈；**纯文本，不带 markdown 标记**——模板里是原样渲染的） */
 const freeStatusText = computed(() => {
@@ -563,7 +569,6 @@ const loadFreeDraft = (raw: unknown) => {
   const shape = parseFreePathShape(raw)
   draftFreePoints.value = []
   draftPolyPoints.value = []
-  freeTripsInput.value = null
   if (!shape) {
     freeMode.value = 'off'
     return
@@ -575,6 +580,23 @@ const loadFreeDraft = (raw: unknown) => {
     freeMode.value = 'polyline'
     draftPolyPoints.value = shape.points.map(num)
   }
+}
+
+/**
+ * 🆕 2026-09-29（用户口径"老版本路径提示需要更新"）：**用户点了「知道了，这次不改」** ⇒ 本次进页不再提示。
+ *
+ * ⚠️ 只记在**内存**里（`ref`，不落盘）：下次进页还会提示 —— 因为这是一条**"建议你更新"**的长期提醒，
+ *    与"要不要记住用户已经知道了"无关（我们不替用户记忆这种选择，也不借此少提醒任何人）。
+ */
+const legacyDismissed = ref(false)
+/** 点「现在重画」：把旧形状载入草稿当底稿（`loadFreeDraft` **不清库**，只是把点填进草稿） */
+const startRedrawLegacy = () => {
+  loadFreeDraft(entry.value?.freeShape)
+  showSnackbar('已把旧路径载入草稿：改动后点「保存到本机路线库」即完成更新（旧数据在你保存前一直保留）', 'info')
+}
+/** 点「知道了」：本次进页不再显示这条提示（不影响任何数据） */
+const dismissLegacyNotice = () => {
+  legacyDismissed.value = true
 }
 /**
  * **【测试】非官方路径的保存**（唯一入口）。
@@ -605,7 +627,7 @@ const saveFreeShape = () => {
     lineName: String(localFreeLine.value?.lineName ?? entry.value?.lineName ?? LOCAL_FREE_LINE_NAME),
   })
   if (!payload) {
-    showSnackbar('还存不了非官方路径：至少 2 个不重合的点（圈型 3 点以上才是真正的圈；折线型多点几个就多几个拐弯）', 'warning')
+    showSnackbar('还存不了这条路径：至少 2 个不重合的点（圈型 3 点以上才是真正的圈；折线型多点几个就多几个拐弯）', 'warning')
     return
   }
   /** 这次保存会不会**真的清掉**一个原先存在的起跑点（提示里如实说，见 `startClearedNote`） */
@@ -619,7 +641,7 @@ const saveFreeShape = () => {
   const detail = `本机跑道 · 第 ${savedEntry.editCount ?? 1} 次保存 · ${freePathShapeText(savedEntry.freeShape) ?? '形状未存上'}`
   const clearedStart = startClearedNote(hadStartAtSave)
   showSnackbar(
-    `【测试】非官方路径已存入本机路线库（${detail}）${clearedStart}${persisted ? '' : '（但本机存储写入失败，刷新后可能丢失）'}`,
+    `研途健行路径已存入本机路线库（${detail}）${clearedStart}${persisted ? '' : '（但本机存储写入失败，刷新后可能丢失）'}`,
     persisted ? undefined : 'warning',
   )
 }
@@ -666,7 +688,7 @@ const clearFreeShapeOnEntry = () => {
   draftFreePoints.value = []
   draftPolyPoints.value = []
   showSnackbar(
-    `已删除「【测试】非官方路径」形状，这条记录改回内外双圈几何${saved.persisted ? '' : '（但本机存储写入失败，刷新后可能丢失）'}`,
+    `已删除「研途健行路径」形状，这条记录改回内外双圈几何${saved.persisted ? '' : '（但本机存储写入失败，刷新后可能丢失）'}`,
     saved.persisted ? undefined : 'warning',
   )
 }
@@ -765,16 +787,43 @@ const pathOf = (pts: P[], close = false) => {
       </div>
     </v-alert>
 
+    <!--
+      🆕 2026-09-29（用户口径，"老版本路径文件提示需要更新"）：本条记录是老版本的路径 ⇒ 如实提示 + 一键重画。
+      ⚠️ 三件事必须说清：① 只是提示，旧的几何照样能用；② 我们不替你自动改/自动删本机数据；
+      ③ 现在起跑点 = 你标的第一个点，"重画"是唯一能让它生效的动作。
+      ⚠️ 上面这几行注释不许写 markdown 星号（会被后来的人复制进真实文案；守卫 `uiText.test.ts` 会拦）。
+      📌 本文件模板注释里的成对星号是**存量基线**（`uiText.test.ts` 按文件计数）⇒ 新写的注释别再新增。
+    -->
+    <v-alert v-if="legacyUpdate.legacy && !legacyDismissed" type="info" variant="tonal" density="comfortable" class="mb-3">
+      <div class="font-weight-bold">
+        <v-icon class="mr-1">mdi-history</v-icon>老版本路径：建议重新画一条（{{ legacyUpdate.detail }}）
+      </div>
+      <div class="text-body-2 mt-1">
+        这条本机记录是<b>旧版本</b>保存的几何，格式与新版本不一样 —— 它<b>仍然能用</b>（跑步页照样会拿它生成轨迹），
+        但为了拿到新口径（<b>起跑点 = 你标的第一个点</b>、长度/圈数在跑步页统一设置），
+        <b>建议在本页重新画一条并保存</b>。我们<b>不会</b>替你自动迁移，也<b>不会</b>删掉你原来的数据。
+      </div>
+      <div class="mt-2 d-flex flex-wrap ga-2">
+        <v-btn size="small" color="primary" variant="flat" prepend-icon="mdi-vector-curve" @click="startRedrawLegacy()">
+          现在重画（切到圈型，并载入旧形状当底稿）
+        </v-btn>
+        <v-btn size="small" variant="text" prepend-icon="mdi-pencil-off" @click="dismissLegacyNotice()">
+          知道了，这次不改
+        </v-btn>
+      </div>
+    </v-alert>
+
     <!-- ② 任务未下发线路（本页真正生效的情形）：与原先那张卡里的说明同一个口径 -->
     <v-alert v-if="localFreeLine && activeTask" type="warning" variant="tonal" density="comfortable" class="mb-3">
       <div class="font-weight-bold">
-        <v-icon class="mr-1">mdi-flask-outline</v-icon>【测试】实验功能：用来给不指定路线的任务画一条自己的路径
+        <v-icon class="mr-1">mdi-run-fast</v-icon>研途健行路径：给「服务端未下发线路」的任务指定一条你自己画的路径
       </div>
       <div class="text-body-2 mt-1">
         本任务「服务端未下发线路」（runPointList 为空），所以跑步页没有官方路线可用 ——
         你可以直接画一条<b>圈型闭合曲线</b>绕着跑，或者画一条<b>折线</b>（可以拐弯，如 A→B→C→D）来回折返跑。
         画完保存进本机路线库（键名仍是 <code>local:free</code>），跑步页就会用这条几何开跑。
         <b>它不是官方线路</b>，只存在这台电脑上，也不会进提交报文。
+        <br />本页<b>只负责"指定路径"</b>：跑多长、绕几圈、用什么配速，都在<b>跑步页右侧的「路径与配速设置」</b>里定。
       </div>
     </v-alert>
 
@@ -782,8 +831,8 @@ const pathOf = (pts: P[], close = false) => {
       <v-col cols="12" md="8">
         <v-card>
           <v-card-title class="text-subtitle-1 d-flex align-center flex-wrap ga-2">
-            【测试】非官方路径地图
-            <v-chip size="small" variant="tonal" color="warning">【测试】洋红=非官方路径</v-chip>
+            研途健行路径地图
+            <v-chip size="small" variant="tonal" color="warning">洋红=你画的路径</v-chip>
             <v-chip size="small" variant="tonal" color="warning">橙=最终轨迹</v-chip>
             <v-chip v-if="officialPts.length > 1" size="small" variant="tonal" color="primary">白虚线=官方路线（参照）</v-chip>
             <v-spacer />
@@ -880,7 +929,7 @@ const pathOf = (pts: P[], close = false) => {
           <v-card-text class="text-caption text-medium-emphasis">
             拖动=平移地图　单击=<b>{{
               freeMode === 'curve'
-                ? '在当前位置加一个非官方路径的点（首尾会自动闭合）'
+                ? '在当前位置加一个路径点（首尾会自动闭合）'
                 : freeMode === 'polyline'
                   ? '在当前位置加一个折线点（逐个点出来，可以拐弯）'
                   : '先在右侧选一个形状（圈型 / 折线型）'
@@ -895,8 +944,8 @@ const pathOf = (pts: P[], close = false) => {
       <v-col cols="12" md="4">
         <v-card variant="outlined" color="warning">
           <v-card-title class="text-subtitle-1 d-flex align-center flex-wrap ga-2">
-            <v-chip size="small" color="warning" variant="flat">【测试】</v-chip>
-            非官方路径绘制
+            <v-chip size="small" color="warning" variant="flat">研途健行</v-chip>
+            路径编辑器
           </v-card-title>
           <v-card-text>
             <div v-if="savedShapeText" class="text-caption text-medium-emphasis mb-3">
@@ -959,86 +1008,46 @@ const pathOf = (pts: P[], close = false) => {
                 {{ freeStatusText }}
               </v-alert>
               <div class="text-caption mb-2">
-                <template v-if="freeMode === 'curve'">
-                  预计长度（闭合曲线一圈）：<b>{{ draftFreeUsable ? curveLengthM(draftFreeShape, true).toFixed(1) + ' m' : '—' }}</b>
-                </template>
-                <template v-else>
-                  预计长度（折线单程）：<b>{{ draftFreeUsable ? polylineShapeLengthM(draftFreeShape).toFixed(1) + ' m' : '—' }}</b>
-                  <template v-if="draftFreeUsable">　·　一来一回 <b>{{ (polylineShapeLengthM(draftFreeShape) * 2).toFixed(1) }} m</b></template>
+                <!--
+                  🆕 2026-09-29（用户口径）：长度/趟数不再是本页的设置项 ⇒ 这里只报"你点了几个点"
+                  （点数只描述"已画了什么"，不是参数、也不需要用户填）。实际要跑多长、绕几圈、什么配速，
+                  全部在跑步页右侧的「路径与配速设置」里定。
+                -->
+                <template v-if="draftFreeShape">
+                  已画：<b>{{ freePathPointCount(draftFreeShape) }} 个点</b>
+                  （{{ freeMode === 'curve' ? '圈型：算法自动闭合首尾' : '折线型：去 + 原路返回 = 一趟' }}）。
                 </template>
                 <!--
-                  🆕 审计 B1：圈型**保留起跑点/绕向**，且用的是"保点旋转"（只插一个点、保留你点的每个折角，
-                  几何总长与形状都不变）；折线型没有"沿弧长旋转"的语义，如实忽略起跑点。
-                  ⭐ 但**保存形状会清掉起跑点**（形状变了，旧 offsetM 是按旧几何量的；见 saveFreeShape 的说明）：
-                    有起跑点时这里必须把这件事说出来，否则用户会以为起点还在原处。
+                  ⭐ 起跑点口径（2026-09-29 用户确认）：固定用你标的第一个点。
+                  实现上仍然沿用既有机制（保存时显式 `start: null`），而 `start` 为空时
+                  `resolveFreePathGeometry` 不做任何旋转 ⇒ 几何第 0 点（= 你标的第一个点）就是起跑点。
+                  ⇒ 因此这里不再需要"保存后回「跑道编辑」重设起跑点"那套说明（那是给双圈几何用的）。
                 -->
-                <template v-if="freeMode === 'curve'">
-                  <br />
-                  <template v-if="hasStart">
-                    圈型会保留本机记录上的起跑点/绕向（在「跑道编辑」里设；用保点旋转，不会改掉你画的形状）。
-                    <br />⚠️ 但<b>保存这条形状会清掉起跑点</b>（形状变了，旧起跑点是按旧形状量的）——
-                    保存后请回「<b>跑道编辑</b>」按新形状重设。
-                  </template>
-                  <template v-else>圈型当前没有起跑点设置（起跑点在「跑道编辑」里设）。</template>
-                </template>
-                <template v-else>
-                  <br />折线型忽略起跑点设置（折线没有"沿弧长旋转"的语义）。
-                  <template v-if="hasStart">
-                    <br />⚠️ 另外：<b>保存这条形状会清掉起跑点</b>（形状变了，旧起跑点是按旧形状量的）——
-                    保存后请回「<b>跑道编辑</b>」按新形状重设。
-                  </template>
-                </template>
+                <br />起跑点：<b>你标的第 1 个点</b>（顺序 = 你在地图上点选的顺序；跑图与预览同源）。
               </div>
               <v-btn block size="small" variant="tonal" class="mb-2" prepend-icon="mdi-undo" :disabled="freeDraftEmpty" @click="undoFreePoint">
-                撤销上一个点（非官方路径）
+                撤销上一个点（本机路径）
               </v-btn>
               <v-btn block size="small" variant="tonal" color="error" class="mb-3" prepend-icon="mdi-delete-outline" @click="clearFreeShape">
                 清空重画
               </v-btn>
 
-              <!-- ④ 折线型的折返趟数（圈型也用它算"绕几圈"，口径一致） -->
-              <v-text-field
-                v-model.number="freeTargetKm"
-                type="number"
-                :min="0.1"
-                :step="0.1"
-                suffix="km"
-                label="目标里程（用来算趟数）"
-                density="compact"
-                hide-details="auto"
-                class="mb-2"
-              />
-              <v-text-field
-                v-model.number="freeTripsInput"
-                type="number"
-                :min="1"
-                :step="1"
-                :placeholder="String(freePlan.trips || 1)"
-                label="趟数（留空＝按目标里程自动算）"
-                density="compact"
-                hide-details="auto"
-                class="mb-1"
-              />
               <!--
-                ⚠️ 审计 B7：**只渲染 `freePlan.note` 这一句**。
-                note 本身已经带了"共 N 圈 · 合计约 X km（依据；一圈多长）" ⇒ 原先外面又拼一遍 head，
-                整句会**打印两遍**（"共 3 圈 · 合计约 1.25 km（共 3 圈 · 合计约 1.25 km（…））"）。
+                🆕 2026-09-29（用户口径）：原先这里的「目标里程（用来算趟数）」「趟数（留空＝按目标里程自动算）」
+                两个输入框，以及「共 N 圈 · 合计约 X km」的计划行，已全部删除 ——
+                本页只负责"指定路径"，跑多长/绕几圈/什么配速都归跑步页的「路径与配速设置」。
+                ⚠️ 保存的形状本身不含里程/趟数（`FreePathShape` 只有 kind + points）⇒ 删除不影响任何旧数据。
               -->
-              <div class="text-caption mb-1">{{ freePlan.note }}</div>
-              <div v-if="freeTripsManualInvalid" class="text-caption text-warning mb-1">
-                ⚠️ 手填的趟数不是有效正数，已按目标里程自动算（口径：<b>宁可多跑，绝不少跑</b>）。
-              </div>
               <v-alert v-if="!draftFreeUsable" type="warning" variant="tonal" density="compact" class="mb-2">
                 还不能跑：{{ freeMode === 'curve' ? '圈型至少 2 个不重合的点（3 点以上才是真正的圈）' : '折线型至少要 2 个不重合的点（多点几个就多几个拐弯）' }}。
               </v-alert>
               <!--
-                ⚠️ 2026-09-22（终检口径提示）：预览里程**固定 1.5 km**，与上面的"目标里程/趟数"无关
-                ⇒ 小圈型会画出好几圈，看着像"圈数与上面写的不一致"。这里**如实写明**，
-                免得测试用户误判"轨迹与形状不一致"（预览只负责证明"轨迹贴着形状"）。
+                🆕 2026-09-29（如实说明，避免误解）：预览里程固定 1.5 km，与"实际要跑多长"无关 ——
+                它只负责证明"轨迹贴着形状"。实际跑多少由跑步页的「目标里程 / 圈数」决定。
               -->
               <div class="text-caption text-medium-emphasis mb-2">
                 地图上橙色那条是<b>轨迹预览</b>：固定画 <b>1.5 km</b> 只为看清"轨迹是否贴着形状"，
-                <b>不代表实际圈数/里程</b>（实际按上面的目标里程与趟数生成）。
+                <b>不代表实际里程/圈数</b>（实际跑多少、绕几圈、什么配速，都在跑步页右侧的「路径与配速设置」里定）。
               </div>
               <v-btn
                 block
@@ -1060,7 +1069,7 @@ const pathOf = (pts: P[], close = false) => {
                 </template>
               </div>
               <!--
-                🆕 审计 B4 的显式出口：把这条记录上的非官方路径形状**删掉**、改回内外双圈。
+                🆕 审计 B4 的显式出口：把这条记录上的路径形状**删掉**、改回内外双圈。
                 ⚠️ 另一种"清掉形状"的方式是在「跑道编辑」里用「保存（本机）」存双圈 —— 那条路会自动清掉形状（并在提示里说明）。
               -->
               <v-btn
@@ -1073,7 +1082,7 @@ const pathOf = (pts: P[], close = false) => {
                 prepend-icon="mdi-vector-polyline-remove"
                 @click="clearFreeShapeOnEntry"
               >
-                改回内外双圈（删除本机记录上的【测试】形状）
+                改回内外双圈（删除本机记录上的研途健行路径形状）
               </v-btn>
             </template>
           </v-card-text>

@@ -122,11 +122,21 @@
           <v-card-text>
             <!-- 当前跑法由 URL（分组内的小标签）决定：只做**说明**，切换用上方标签或顶部导航 -->
             <div class="d-flex align-center flex-wrap ga-2 mb-2">
-              <v-icon size="small" color="primary">{{ isFreeRun ? 'mdi-run' : 'mdi-white-balance-sunny' }}</v-icon>
+              <v-icon size="small" color="primary">{{ runModeIcon }}</v-icon>
               <!-- ⚠️ 用 `text-no-wrap`：此前"当前模式：自由跑"在窄列里被拆成两行（"自由/跑"），很难看 -->
-              <span class="text-body-2 font-weight-bold text-no-wrap">当前模式：{{ isFreeRun ? '自由跑' : '阳光跑' }}</span>
+              <span class="text-body-2 font-weight-bold text-no-wrap">当前模式：{{ runModeLabel }}</span>
               <span class="text-caption text-medium-emphasis">（切换用上方标签）</span>
             </div>
+            <!--
+              🆕 2026-09-29（用户反馈："研途健行在右侧的设置界面还是阳光跑"）：
+              「研途健行」页虽然跑法与阳光跑同一套（`runType=0`），但对用户来说是另一个模式，
+              不能再把它显示成"阳光跑"。所以本页给一句它自己的说明（口径与阳光跑一致，不制造两套规则）。
+              ⚠️ 这段注释与下面那条 v-alert 里都不许写 markdown 星号（会被复制进真实文案；守卫会拦）。
+            -->
+            <v-alert v-if="isYtuTab && routeIsFree" type="info" variant="tonal" density="compact" class="mb-2">
+              本页是<b>阳光跑同一套跑法</b>（带任务号提交、计入成绩），只是<b>任务未下发线路</b> ⇒
+              轨迹用你自己画的路径生成。下面「路径与配速设置」里的几项决定这一趟怎么跑。
+            </v-alert>
 
             <!-- ⚠️ 自由跑的**提交口径**（2026-09-18 按厂商源码落地，**不能改**）：
                  厂商在自由跑时 `0==runType && (取线路)` 根本不执行 ⇒ paperId/lineId 都是空串、
@@ -141,7 +151,16 @@
               <b>不会</b>被写进提交报文 —— 提交时线路标识一律为空。
               跑到<b>你设的目标距离</b>或你点「结束并结算」即止。
             </v-alert>
+            <!--
+              🆕 2026-09-29（用户反馈"研途健行页还是阳光跑"的连带优化）：
+              「研途健行」页里这个服务端线路下拉是多余的 —— 这类任务 `runPointList` 为空，
+              这个下拉必然是"停用 + 没有任何可选项"，摆在最上面只会让人以为设置错了
+              （用户实际看到的正是"右侧还是阳光跑那套"）。
+              ⇒ 该页不渲染它，只保留下面那条"服务端未下发线路"的说明与「本机路径」下拉。
+              ⚠️ 官方线路任务（`routeIsFree === false`）与自由跑页逐字不变。
+            -->
             <v-select
+              v-if="!isYtuTab"
               v-model="run.lineId"
               :items="lineItems"
               item-title="title"
@@ -301,7 +320,7 @@
               </div>
               <v-alert type="info" variant="tonal" density="compact" class="mb-2">
                 本任务「服务端未下发线路」⇒ 轨迹用你在「<b>研途健行路径编辑器</b>」画的路径生成。
-                下面三项决定<b>本次跑多长 / 绕几圈 / 用什么配速</b>；<b>起跑点固定是你标的第 1 个点</b>。
+                下面几项决定<b>本次跑多长 / 绕几圈 / 用什么配速</b>；<b>起跑点固定是你标的第 1 个点</b>。
               </v-alert>
               <v-text-field
                 v-model="ytuKmText"
@@ -1474,6 +1493,15 @@ const ytuTaskLabel = computed(() => {
  *     **路由判定读"末段 / 参数"，并且要覆盖所有合法的末段**）。
  */
 const isSunRun = computed(() => !isFreeTab.value)
+/**
+ * 右侧栏「当前模式」要显示的名字（用户 2026-09-29 反馈：研途健行页当时显示的还是"阳光跑"）。
+ *
+ * ⚠️ 三者的**提交口径**只有两种：自由跑 `runType=1`，其余 `runType=0`；
+ *    但「对用户显示的模式名」有三种 —— **别把"显示名"和"提交口径"混成一个概念**
+ *    （混了就会出现"显示对了、提交错了"这类事故；判据仍是 `isFreeTab`）。
+ */
+const runModeLabel = computed(() => (isFreeTab.value ? '自由跑' : isYtuTab.value ? '研途健行' : '阳光跑'))
+const runModeIcon = computed(() => (isFreeTab.value ? 'mdi-run' : isYtuTab.value ? 'mdi-map-marker-path' : 'mdi-white-balance-sunny'))
 /** 用户画的这条路径是"圈型"还是"折线型"（只影响措辞；判据仍来自本机几何） */
 const freeModeLabelForPath = computed(() => (freePathLapLengthM(freeRouteEntry.value?.freeShape) > 0 ? '圈型：绕一圈' : '折线型：一去一回'))
 /** 任务下发的里程（公里）；缺失/为 0 ⇒ 0（界面据此说"任务没给里程"） */

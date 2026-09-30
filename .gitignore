@@ -21,6 +21,10 @@ npm-debug.log*
 DEVELOPMENT.md
 ERROR.md
 HANDOVER.md
+# 🆕 2026-09-30：接手说明（五分钟上手版）—— 与上面三份同类，只留开发副本。
+# ⚠️ 必须**显式写这一行**：`.gitignore` 的 `HANDOVER.md` 只匹配这个**精确文件名**，
+#    盖不住 `HANDOVER-接手说明.md`（前缀相似 ≠ 命中）⇒ 漏写它就会被 `git add -A` 提交上去。
+HANDOVER-接手说明.md
 # 鸣谢名单编辑面板 + 它导出的草稿 JSON（2026-09-25）：用户填、代理读后生成进 pages/credits.vue
 # —— 属"协作输入工具"，跟 DEVELOPMENT/HANDOVER 同类：只留开发副本、不进仓库
 鸣谢名单编辑面板.html

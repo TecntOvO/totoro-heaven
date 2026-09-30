@@ -1,7 +1,21 @@
 ﻿# 一键发布 totoro-heaven release（读 Windows 凭据管理器 token -> 设 GH_TOKEN -> node release.cjs）
-# 用法：.\pack\release\publish.ps1            （默认用 package.json 的 version 作为 tag）
-#       .\pack\release\publish.ps1 -Tag 1.0.4 （覆盖 tag）
-param([string]$Tag = '')
+# 用法：.\pack\release\publish.ps1                                   （默认用 package.json 的 version 作为 tag）
+#       .\pack\release\publish.ps1 -Tag 1.0.4                        （覆盖 tag）
+#       .\pack\release\publish.ps1 -Tag 1.2.6 -Zip dist/x.zip -SevenZip dist/x.7z -Notes dist/body.md
+#       .\pack\release\publish.ps1 -Tag 1.2.6 -ExtraArgs @('--zip','dist/x.zip')
+#
+# ⚠️ 2026-09-30（1.2.6 发布时踩到）：**原版只把 -Tag 传下去**，`--zip/--sevenZip/--notes` 一律被
+#    静默丢掉（PowerShell 对"没声明的额外参数"不报错）⇒ 发预发布件（附件名带 -pre<n> 后缀）时
+#    会回落到默认路径、报"找不到发布附件 <默认名>"，看起来像文件不存在，实际是参数没传过去。
+#    现在：显式参数与 -ExtraArgs（原样透传）都会被转发；**转发用哈希表 splat**（数组 splat 会按空格
+#    重新切分含空格的参数值 —— 这是本项目已有记录的坑）。
+param(
+  [string]$Tag = '',
+  [string]$Zip = '',
+  [string]$SevenZip = '',
+  [string]$Notes = '',
+  [string[]]$ExtraArgs = @()
+)
 
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 if (-not $Tag) {
@@ -44,12 +58,18 @@ $tok = [Cred]::GetStr('git:https://github.com', 1)
 if ($tok -match '^(gho_|ghp_|github_pat_)') {
   $env:GH_TOKEN = $tok
   Write-Host ("token ok (len " + $tok.Length + ") -> publishing tag " + $Tag)
-  node --use-system-ca (Join-Path $PSScriptRoot 'release.cjs') --tag $Tag
-  # 2026-09-20 audit fix: this script used to ignore node's exit code, so a FAILED publish
-  # (missing asset / HTTP 4xx-5xx / upload error) still ended with "exit 0" for the caller.
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host ("publish FAILED (node exit " + $LASTEXITCODE + ")")
-    exit $LASTEXITCODE
+  # 2026-09-30：显式参数与 -ExtraArgs 都转发（原来只转发 -Tag，见文件头的说明）
+  $nodeArgs = @('--use-system-ca', (Join-Path $PSScriptRoot 'release.cjs'), '--tag', $Tag)
+  if ($Zip) { $nodeArgs += @('--zip', $Zip) }
+  if ($SevenZip) { $nodeArgs += @('--sevenZip', $SevenZip) }
+  if ($Notes) { $nodeArgs += @('--notes', $Notes) }
+  foreach ($x in $ExtraArgs) { $nodeArgs += $x }
+  $splat = @{ FilePath = 'node'; ArgumentList = $nodeArgs; NoNewWindow = $true; Wait = $true; PassThru = $true }
+  $p = Start-Process @splat
+  $code = $p.ExitCode
+  if ($code -ne 0) {
+    Write-Host ("publish FAILED (node exit " + $code + ")")
+    exit $code
   }
   Write-Host 'publish ok'
 } else {

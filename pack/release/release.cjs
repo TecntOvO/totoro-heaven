@@ -30,7 +30,27 @@ const https = require('node:https')
 const ROOT = path.resolve(__dirname, '..', '..')
 
 const argv = process.argv.slice(2)
+/**
+ * ⚠️ 2026-09-30（1.2.6 发布时踩到，两条各自独立的坑）：
+ *
+ * ① **`--key value` 与 `--key=value` 两种写法都要认**（`=` 连写很多人会这么写）：
+ *    原实现只找 `--zip` 这个**独立 argv 元素** ⇒ 没找到就**静默回落到默认路径**
+ *    `dist/totoro-heaven-<tag>.zip`，报出来的是"找不到发布附件 <默认名>" ——
+ *    **看起来像"文件不存在"，其实是"参数根本没传进来"**（本轮先后怀疑了路径、工作目录、附件是否复制，
+ *    最后才发现是**调用方**没转发参数，见下条）。
+ * ② **调用方必须真的转发参数**：`pack/release/publish.ps1` 只把 `-Tag` 传给本脚本，
+ *    `--zip/--sevenZip/--notes` 会被**静默丢掉**（PowerShell 脚本不会因为"多了没声明的参数"报错）。
+ *    ⇒ 预发布件（附件名带 `-pre<n>` 后缀）发布时**直接调本脚本**，或先把参数写进 `publish.ps1`。
+ *
+ * 判据（一句话）：**"找不到文件"这类报错之前，先确认参数真的到达了**；
+ * 参数解析同时支持两种写法，且默认值回落要有可辨识的日志。
+ */
 const argOf = (name, fallback) => {
+  const forced = argv.find((a) => a.startsWith(`--${name}=`))
+  if (forced) {
+    const v = forced.slice(name.length + 3)
+    if (v) return v
+  }
   const i = argv.indexOf(`--${name}`)
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback
 }

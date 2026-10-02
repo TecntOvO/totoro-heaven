@@ -52,9 +52,9 @@ export const VERSION_ADVICE = {
 /** 版本列表（最新在前） */
 export const VERSION_ENTRIES: VersionEntry[] = [
   {
-    version: '1.2.7',
+    version: '1.3.1',
     /** ⚠️ 日期口径（规则 12）：定版那天先跑 Get-Date 读本机日期，发布后再用 published_at 复核（有脚本核对）。 */
-    date: '2026-09-30',
+    date: '2026-10-02',
     channel: 'stable',
     title: '开发中（尚无已确认的新需求）',
     planned: true,

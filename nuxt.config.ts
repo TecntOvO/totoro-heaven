@@ -1,5 +1,8 @@
 import { defineNuxtConfig } from 'nuxt/config'
 
+// 源码版与 EXE 并行运行时，通过 NUXT_PORT 同步调整页面和热更新端口。
+const devPort = Number(process.env.NUXT_PORT || 3000)
+
 export default defineNuxtConfig({
   // ⚠️ 2026-09-17 修正（vue-tsc 查出后**再更正**）：原先写在**根级**的 `compatibilityDate` 让 typecheck 失败
   //    （`nuxt 3.9.1` 的 `NuxtConfig` 类型里没有这个键），但它**并不是空操作** ——
@@ -40,7 +43,7 @@ export default defineNuxtConfig({
    *   这正是 `server/utils/tokenScanState.ts:91` 注释里"dev 用 `--host 127.0.0.1`"的前提 ⇒ 现在固化进配置。
    */
   devServer: {
-    port: 3000,
+    port: devPort,
     host: '127.0.0.1',
   },
   vite: {
@@ -49,7 +52,7 @@ export default defineNuxtConfig({
         ignored: ['**/_mp-analyze/**', '**/.mp-test-build/**'],
       },
       hmr: {
-        port: 3000,
+        port: devPort,
         protocol: 'ws',
         host: 'localhost',
       },

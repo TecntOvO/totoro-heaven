@@ -17,15 +17,23 @@
 /* ⚠️ 2026-09-19 删除**零引用**的 `TOKEN_SCAN_TIMEOUT_MS`：真实超时由
    `tokenScanRunner.ts` 的轮询间隔与 PS 脚本内的 `-TimeoutSec` 决定，这个常量从未被读取。 */
 
+/** 与脚本参数一起维护：Windows PowerShell 会提前处理 -Endpoint，导致脚本未执行就退出 -1。 */
+export function tokenScannerArgs(script: string, callbackUrl: string, nonce: string): string[] {
+  return [
+    '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+    '-File', script, '-CallbackUrl', callbackUrl, '-Nonce', nonce,
+  ]
+}
+
 export const TOKEN_SCAN_PS1 = `param(
-  [Parameter(Mandatory=$true)][string]$Endpoint,
+  [Parameter(Mandatory=$true)][string]$CallbackUrl,
   [Parameter(Mandatory=$true)][string]$Nonce,
   [int]$Max = 12,
   [string]$TitleNeedle = ''
 )
 $ErrorActionPreference = 'Stop'
 
-# "龙猫" 的 ASCII-only 写法（避免无 BOM 中文被 PS 5.1 按 ANSI 误解码）
+# Build the title using character codes (Windows PowerShell reads BOM-less files as ANSI).
 if ([string]::IsNullOrEmpty($TitleNeedle)) { $TitleNeedle = -join ([char]0x9F99, [char]0x732B) }
 
 $cs = @'
@@ -160,7 +168,7 @@ $payload = @{
 
 $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
 try {
-  Invoke-RestMethod -Method Post -Uri $Endpoint -ContentType 'application/json' -Body $bytes -TimeoutSec 30 | Out-Null
+  Invoke-RestMethod -Method Post -Uri $CallbackUrl -ContentType 'application/json' -Body $bytes -TimeoutSec 30 | Out-Null
 } catch {
   Write-Host ('POST failed: ' + $_.Exception.Message)
   exit 1

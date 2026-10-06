@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { TOKEN_SCAN_PS1 } from './tokenScanScript'
+import { TOKEN_SCAN_PS1, tokenScannerArgs } from './tokenScanScript'
 import { getScan, patchScan } from './tokenScanState'
 
 /** 内嵌脚本在临时目录里的落点（固定名，便于排错；内容每次覆盖写） */
@@ -28,23 +28,13 @@ function scriptPath(): string {
  */
 export function launchTokenScanner(endpoint: string, nonce: string): void {
   const ps = process.platform === 'win32' ? 'powershell.exe' : 'pwsh'
-  const args = [
-    '-NoProfile',
-    '-ExecutionPolicy',
-    'Bypass',
-    '-File',
-    scriptPath(),
-    '-Endpoint',
-    endpoint,
-    '-Nonce',
-    nonce,
-  ]
+  const args = tokenScannerArgs(scriptPath(), endpoint, nonce)
 
   const child = spawn(ps, args, { windowsHide: true, stdio: 'ignore' })
 
   child.on('error', (err) => {
     const cur = getScan()
-    if (cur && cur.phase === 'scanning') {
+    if (cur && cur.nonce === nonce && cur.phase === 'scanning') {
       patchScan({ phase: 'error', message: `无法启动扫描器：${err.message}（本机需有 PowerShell）` })
     }
   })
@@ -56,7 +46,7 @@ export function launchTokenScanner(endpoint: string, nonce: string): void {
       if (cur && cur.nonce === nonce && cur.phase === 'scanning') {
         patchScan({
           phase: 'error',
-          message: `扫描器未回传结果（退出码 ${code}）——可能是杀软拦截了跨进程读内存；可改用抓包路线`,
+          message: `扫描器未回传结果（退出码 ${code}）——请检查 PowerShell 是否能正常运行，以及本机回传连接是否失败；仅凭退出码无法判断是否被安全软件拦截`,
         })
       }
     }, 3000)
